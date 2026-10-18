@@ -14,6 +14,7 @@
         "status": { "type": "string", "enum": ["active", "inactive"] },
         "classIds": { "type": "array" },
         "levelIds": { "type": "array" },
+        "subjectIds": { "type": "array" },
         "createdBy": { "type": "string" },
         "createdAt": { "type": "string" },
         "lastLoginAt": { "type": "string" }
@@ -68,7 +69,7 @@
     },
     "Lesson": {
       "title": "Lesson",
-      "description": "Lesson note authored by teacher and visible to enrolled classes",
+      "description": "Lesson note authored by teacher with YouTube video embedding and downloadable files",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
@@ -78,6 +79,9 @@
         "subjectId": { "type": "string" },
         "bodyHtml": { "type": "string" },
         "attachments": { "type": "array" },
+        "videoUrl": { "type": "string" },
+        "videoType": { "type": "string" },
+        "videoTitle": { "type": "string" },
         "status": { "type": "string", "enum": ["draft", "published"] },
         "createdBy": { "type": "string" },
         "createdAt": { "type": "string" },
@@ -175,11 +179,19 @@
     },
     "SystemSettings": {
       "title": "SystemSettings",
-      "description": "Global school configuration",
+      "description": "Global school configuration, theme, and branding",
       "type": "object",
       "properties": {
         "appName": { "type": "string" },
+        "tagline": { "type": "string" },
         "logoUrl": { "type": "string" },
+        "logoTheme": { "type": "string" },
+        "themeId": { "type": "string" },
+        "schoolAddress": { "type": "string" },
+        "contactEmail": { "type": "string" },
+        "contactPhone": { "type": "string" },
+        "schoolWebsite": { "type": "string" },
+        "principalOrHead": { "type": "string" },
         "defaultPassMarkPercent": { "type": "number" },
         "academicTermLabel": { "type": "string" },
         "updatedAt": { "type": "string" }

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User as FirebaseUser, onAuthStateChanged, signOut as fbSignOut } from 'firebase/auth';
-import { auth } from '@/src/lib/firebase';
+import { User as FirebaseUser, onAuthStateChanged, signOut as fbSignOut, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { auth, firebaseConfig } from '@/src/lib/firebase';
 import { UserProfile } from '@/src/types';
 import { loginWithUsername, getUserProfile } from '@/src/services/authService';
 import { dataStore } from '@/src/services/dataStore';
@@ -97,6 +97,7 @@ interface AuthContextValue {
   isTeacher: boolean;
   isStudent: boolean;
   signIn: (username: string, password: string) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
   switchDemoUser: (key: 'admin' | 'teacher1' | 'student1' | 'student2' | 'inactive_user') => void;
   isPlaceholderMode: boolean;
@@ -114,7 +115,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     // Check if running with placeholder config
-    const isPlaceholder = !import.meta.env.VITE_FIREBASE_API_KEY || import.meta.env.VITE_FIREBASE_API_KEY === 'placeholder-api-key';
+    const isPlaceholder = !firebaseConfig.apiKey || firebaseConfig.apiKey === 'placeholder-api-key';
     setIsPlaceholderMode(isPlaceholder);
 
     // If active profile is preserved in localStorage, restore it from dataStore or DEMO_USERS
@@ -266,6 +267,47 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const signInWithGoogle = async (): Promise<void> => {
+    setLoading(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      const fbUser = result.user;
+      setUser(fbUser);
+
+      // Fetch or auto-provision profile in Firestore and local state
+      let userProfile = await getUserProfile(fbUser.uid);
+      if (!userProfile) {
+        const isSuper = fbUser.email === 'saltechmultimedia@gmail.com';
+        const role: 'admin' | 'student' = isSuper ? 'admin' : 'student';
+        const username = fbUser.email ? fbUser.email.split('@')[0] : `user_${fbUser.uid.slice(0, 6)}`;
+        userProfile = {
+          uid: fbUser.uid,
+          username,
+          usernameLower: username.toLowerCase(),
+          authEmail: fbUser.email || `${username}@eduform.local`,
+          fullName: fbUser.displayName || 'Google User',
+          role,
+          status: 'active',
+          classIds: ['class-jss1-a'],
+          levelIds: ['level-basic'],
+          subjectIds: ['subj-mth', 'subj-eng', 'subj-sci'],
+          createdBy: 'google-oauth',
+          createdAt: new Date().toISOString(),
+          lastLoginAt: new Date().toISOString(),
+        };
+        dataStore.saveUser(userProfile);
+      }
+      setProfile(userProfile);
+      localStorage.setItem(LOCAL_STORAGE_DEMO_KEY, userProfile.uid);
+    } catch (err: unknown) {
+      console.error('Google Sign-In error:', err);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const signOut = async () => {
     try {
       localStorage.removeItem(LOCAL_STORAGE_DEMO_KEY);
@@ -322,6 +364,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isTeacher,
         isStudent,
         signIn,
+        signInWithGoogle,
         signOut,
         switchDemoUser,
         isPlaceholderMode,

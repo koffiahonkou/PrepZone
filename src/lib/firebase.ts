@@ -1,17 +1,19 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth } from 'firebase/auth';
-import { getFirestore, Firestore } from 'firebase/firestore';
+import { getFirestore, Firestore, doc, getDocFromServer } from 'firebase/firestore';
 import { getStorage, FirebaseStorage } from 'firebase/storage';
+import firebaseAppletConfig from '@/firebase-applet-config.json';
 
 export const AUTH_DOMAIN = 'eduform.local';
 
 export const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'placeholder-api-key',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'eduform-app.firebaseapp.com',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'eduform-app',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'eduform-app.appspot.com',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '123456789012',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:123456789012:web:abcdef123456',
+  apiKey: firebaseAppletConfig.apiKey || import.meta.env.VITE_FIREBASE_API_KEY || 'placeholder-api-key',
+  authDomain: firebaseAppletConfig.authDomain || import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'eduform-app.firebaseapp.com',
+  projectId: firebaseAppletConfig.projectId || import.meta.env.VITE_FIREBASE_PROJECT_ID || 'eduform-app',
+  firestoreDatabaseId: firebaseAppletConfig.firestoreDatabaseId || '(default)',
+  storageBucket: firebaseAppletConfig.storageBucket || import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'eduform-app.appspot.com',
+  messagingSenderId: firebaseAppletConfig.messagingSenderId || import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '123456789012',
+  appId: firebaseAppletConfig.appId || import.meta.env.VITE_FIREBASE_APP_ID || '1:123456789012:web:abcdef123456',
 };
 
 // Primary App
@@ -19,8 +21,22 @@ export const app: FirebaseApp =
   getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 export const auth: Auth = getAuth(app);
-export const db: Firestore = getFirestore(app);
+
+// CRITICAL: Must pass firebaseConfig.firestoreDatabaseId to connect to the provisioned database
+export const db: Firestore = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const storage: FirebaseStorage = getStorage(app);
+
+// Validate Connection to Firestore on startup as mandated by Firebase skill
+async function testConnection() {
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.error('Please check your Firebase configuration.');
+    }
+  }
+}
+testConnection();
 
 // Secondary App factory to avoid signing out the active admin during user creation
 const SECONDARY_APP_NAME = 'admin-secondary';
