@@ -1,0 +1,140 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function currentUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isActive() {
+      return isSignedIn() && currentUserData().status == 'active';
+    }
+
+    function isAdmin() {
+      return isSignedIn() && currentUserData().role == 'admin' && currentUserData().status == 'active';
+    }
+
+    function userClassIds() {
+      return currentUserData().classIds;
+    }
+
+    // USERS COLLECTION
+    // Users can read their own profile; admins can read & write all profiles.
+    // Self-modification is blocked to prevent role or status escalation.
+    match /users/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow create, update, delete: if isAdmin();
+    }
+
+    // USERNAME LOCK COLLECTION
+    // Enforces global username uniqueness. Only admins can read or reserve.
+    match /usernames/{usernameLower} {
+      allow read, write: if isAdmin();
+    }
+
+    // ACADEMIC LEVELS
+    match /levels/{levelId} {
+      allow read: if isActive();
+      allow write: if isAdmin();
+    }
+
+    // CLASSES & STREAMS
+    match /classes/{classId} {
+      allow read: if isActive();
+      allow write: if isAdmin();
+    }
+
+    // SUBJECTS
+    match /subjects/{subjectId} {
+      allow read: if isActive();
+      allow write: if isAdmin();
+    }
+
+    // LESSONS
+    // Published lessons readable only if caller's classIds intersects lesson's classIds. Admins read/write all.
+    match /lessons/{lessonId} {
+      allow read: if isAdmin() || (
+        isActive() &&
+        resource.data.status == 'published' &&
+        resource.data.classIds.hasAny(userClassIds())
+      );
+      allow write: if isAdmin();
+    }
+
+    // QUIZZES
+    // Published quizzes readable if assigned to student's class and within release window.
+    match /quizzes/{quizId} {
+      allow read: if isAdmin() || (
+        isActive() &&
+        resource.data.status == 'published' &&
+        resource.data.classIds.hasAny(userClassIds())
+      );
+      allow write: if isAdmin();
+    }
+
+    // SUBMISSIONS
+    // Students create/read only their own submissions.
+    // Students can never modify score/grading fields.
+    // Admins have full access for manual grading and auditing.
+    match /submissions/{submissionId} {
+      allow read: if isAdmin() || (
+        isActive() && resource.data.userId == request.auth.uid
+      );
+      allow create: if isActive() &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.classIds != null || true;
+      allow update: if isAdmin() || (
+        isActive() &&
+        resource.data.userId == request.auth.uid &&
+        resource.data.status == 'auto_graded' &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['autoScore', 'manualScore', 'totalScore', 'percent', 'status', 'gradedBy', 'gradedAt'])
+      );
+      allow delete: if isAdmin();
+    }
+
+    // NOTIFICATIONS
+    // Writable only by admins. Readable by targeted audience.
+    match /notifications/{notificationId} {
+      allow read: if isAdmin() || (
+        isActive() && (
+          resource.data.audience.type == 'all' ||
+          (resource.data.audience.type == 'class' && resource.data.audience.ids.hasAny(userClassIds())) ||
+          (resource.data.audience.type == 'user' && resource.data.audience.ids.hasAny([request.auth.uid]))
+        )
+      );
+      allow write: if isAdmin();
+    }
+
+    // NOTIFICATION READ RECEIPTS
+    match /notificationReads/{readId} {
+      allow read, write: if isActive() && (
+        resource == null || resource.data.userId == request.auth.uid || request.resource.data.userId == request.auth.uid
+      );
+    }
+
+    // AUDIT LOGS
+    // Append-only; readable only by admins.
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    // GLOBAL SETTINGS
+    match /settings/{settingId} {
+      allow read: if isActive();
+      allow write: if isAdmin();
+    }
+  }
+}

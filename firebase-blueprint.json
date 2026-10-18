@@ -1,0 +1,240 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with role-based access control, class assignments, and status",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "username": { "type": "string", "minLength": 3, "maxLength": 20, "pattern": "^[a-z0-9._-]+$" },
+        "usernameLower": { "type": "string", "minLength": 3, "maxLength": 20, "pattern": "^[a-z0-9._-]+$" },
+        "authEmail": { "type": "string", "format": "email" },
+        "fullName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "role": { "type": "string", "enum": ["admin", "teacher", "student"] },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "classIds": { "type": "array" },
+        "levelIds": { "type": "array" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "lastLoginAt": { "type": "string" }
+      },
+      "required": ["uid", "username", "usernameLower", "authEmail", "fullName", "role", "status", "createdBy", "createdAt"]
+    },
+    "UsernameLock": {
+      "title": "UsernameLock",
+      "description": "Reservation lock to enforce global username uniqueness without exposing user lists",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "reservedAt": { "type": "string" },
+        "reservedBy": { "type": "string" }
+      },
+      "required": ["uid", "reservedAt", "reservedBy"]
+    },
+    "AcademicLevel": {
+      "title": "AcademicLevel",
+      "description": "School level or grade tier (e.g. JSS 1, Grade 10)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 50 },
+        "order": { "type": "number" }
+      },
+      "required": ["id", "name", "order"]
+    },
+    "AcademicClass": {
+      "title": "AcademicClass",
+      "description": "Individual classroom stream assigned to a level",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 50 },
+        "levelId": { "type": "string" },
+        "subjectIds": { "type": "array" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "levelId", "subjectIds", "createdAt"]
+    },
+    "Subject": {
+      "title": "Subject",
+      "description": "Academic subject curriculum definition",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 60 },
+        "code": { "type": "string", "maxLength": 15 }
+      },
+      "required": ["id", "name", "code"]
+    },
+    "Lesson": {
+      "title": "Lesson",
+      "description": "Lesson note authored by teacher and visible to enrolled classes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string", "maxLength": 200 },
+        "classIds": { "type": "array" },
+        "levelIds": { "type": "array" },
+        "subjectId": { "type": "string" },
+        "bodyHtml": { "type": "string" },
+        "attachments": { "type": "array" },
+        "status": { "type": "string", "enum": ["draft", "published"] },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "title", "classIds", "subjectId", "status", "createdBy", "createdAt"]
+    },
+    "Quiz": {
+      "title": "Quiz",
+      "description": "Assessment with objective and theory questions, settings, and timers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string" },
+        "subjectId": { "type": "string" },
+        "classIds": { "type": "array" },
+        "levelIds": { "type": "array" },
+        "status": { "type": "string", "enum": ["draft", "published", "closed"] },
+        "settings": { "type": "object" },
+        "questions": { "type": "array" },
+        "totalMarks": { "type": "number" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "title", "subjectId", "classIds", "status", "settings", "questions", "totalMarks", "createdBy", "createdAt"]
+    },
+    "Submission": {
+      "title": "Submission",
+      "description": "Student quiz attempt with auto and manual grading breakdown",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "quizId": { "type": "string" },
+        "userId": { "type": "string" },
+        "classId": { "type": "string" },
+        "attemptNumber": { "type": "number" },
+        "answers": { "type": "array" },
+        "autoScore": { "type": "number" },
+        "autoTotal": { "type": "number" },
+        "manualScore": { "type": "number" },
+        "manualTotal": { "type": "number" },
+        "totalScore": { "type": "number" },
+        "totalPossible": { "type": "number" },
+        "percent": { "type": "number" },
+        "status": { "type": "string", "enum": ["auto_graded", "pending_manual", "fully_graded"] },
+        "questionOrder": { "type": "array" },
+        "optionOrder": { "type": "object" },
+        "submittedAt": { "type": "string" },
+        "gradedBy": { "type": "string" },
+        "gradedAt": { "type": "string" }
+      },
+      "required": ["id", "quizId", "userId", "classId", "attemptNumber", "answers", "totalScore", "totalPossible", "status", "submittedAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Broadcast notice to whole school, class, or student",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string", "maxLength": 200 },
+        "bodyHtml": { "type": "string" },
+        "priority": { "type": "string", "enum": ["normal", "high"] },
+        "audience": { "type": "object" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "expiresAt": { "type": "string" }
+      },
+      "required": ["id", "title", "bodyHtml", "priority", "audience", "createdBy", "createdAt"]
+    },
+    "NotificationRead": {
+      "title": "NotificationRead",
+      "description": "Tracks read acknowledgment per user per notification",
+      "type": "object",
+      "properties": {
+        "notificationId": { "type": "string" },
+        "userId": { "type": "string" },
+        "readAt": { "type": "string" }
+      },
+      "required": ["notificationId", "userId", "readAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable log of administrative events",
+      "type": "object",
+      "properties": {
+        "actorId": { "type": "string" },
+        "action": { "type": "string" },
+        "targetType": { "type": "string" },
+        "targetId": { "type": "string" },
+        "meta": { "type": "object" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["actorId", "action", "targetType", "targetId", "timestamp"]
+    },
+    "SystemSettings": {
+      "title": "SystemSettings",
+      "description": "Global school configuration",
+      "type": "object",
+      "properties": {
+        "appName": { "type": "string" },
+        "logoUrl": { "type": "string" },
+        "defaultPassMarkPercent": { "type": "number" },
+        "academicTermLabel": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["appName", "defaultPassMarkPercent", "academicTermLabel"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles and RBAC role data"
+    },
+    "/usernames/{usernameLower}": {
+      "schema": { "$ref": "#/entities/UsernameLock" },
+      "description": "Unique username reservation lock"
+    },
+    "/levels/{levelId}": {
+      "schema": { "$ref": "#/entities/AcademicLevel" },
+      "description": "Academic levels"
+    },
+    "/classes/{classId}": {
+      "schema": { "$ref": "#/entities/AcademicClass" },
+      "description": "Class cohorts"
+    },
+    "/subjects/{subjectId}": {
+      "schema": { "$ref": "#/entities/Subject" },
+      "description": "Academic curriculum subjects"
+    },
+    "/lessons/{lessonId}": {
+      "schema": { "$ref": "#/entities/Lesson" },
+      "description": "Classroom lecture and lesson notes"
+    },
+    "/quizzes/{quizId}": {
+      "schema": { "$ref": "#/entities/Quiz" },
+      "description": "Assessments, questions, and test configuration"
+    },
+    "/submissions/{submissionId}": {
+      "schema": { "$ref": "#/entities/Submission" },
+      "description": "Student quiz attempts and grades"
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "Institutional broadcast announcements"
+    },
+    "/notificationReads/{readId}": {
+      "schema": { "$ref": "#/entities/NotificationRead" },
+      "description": "Read tracking receipts"
+    },
+    "/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "System audit logs"
+    },
+    "/settings/global": {
+      "schema": { "$ref": "#/entities/SystemSettings" },
+      "description": "Global school settings"
+    }
+  }
+}
