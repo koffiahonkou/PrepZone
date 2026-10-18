@@ -54,6 +54,9 @@ export interface Lesson {
   subjectId: string;
   bodyHtml: string;
   attachments: LessonAttachment[];
+  videoUrl?: string;
+  videoType?: 'youtube' | 'vimeo' | 'mp4' | 'upload' | string;
+  videoTitle?: string;
   status: 'draft' | 'published';
   createdBy: string;
   createdAt: string;

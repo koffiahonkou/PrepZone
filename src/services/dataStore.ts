@@ -275,7 +275,24 @@ class DataStore {
 
   // --- Lessons ---
   public getLessons(): Lesson[] {
-    return getStoredOrInit<Lesson[]>(STORAGE_KEYS.LESSONS, INITIAL_LESSONS);
+    const lessons = getStoredOrInit<Lesson[]>(STORAGE_KEYS.LESSONS, INITIAL_LESSONS);
+    let modified = false;
+    for (const initL of INITIAL_LESSONS) {
+      const existing = lessons.find((l) => l.id === initL.id);
+      if (!existing) {
+        lessons.push(initL);
+        modified = true;
+      } else if (!existing.videoUrl && initL.videoUrl) {
+        existing.videoUrl = initL.videoUrl;
+        existing.videoType = initL.videoType;
+        existing.videoTitle = initL.videoTitle;
+        modified = true;
+      }
+    }
+    if (modified) {
+      saveStore(STORAGE_KEYS.LESSONS, lessons);
+    }
+    return lessons;
   }
 
   public getLessonById(id: string): Lesson | undefined {

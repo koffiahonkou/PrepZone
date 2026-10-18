@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   BookOpen,
@@ -9,6 +9,8 @@ import {
   AlertCircle,
   ArrowRight,
   TrendingUp,
+  Video,
+  Play,
 } from 'lucide-react';
 import { useAuth } from '@/src/context/AuthContext';
 import { dataStore } from '@/src/services/dataStore';
@@ -16,21 +18,34 @@ import { dataStore } from '@/src/services/dataStore';
 export const StudentDashboard: React.FC = () => {
   const { profile } = useAuth();
 
-  const quizzes = dataStore.getQuizzes();
-  const classes = dataStore.getClasses();
-  const subjects = dataStore.getSubjects();
-  const studentSubs = dataStore.getSubmissionsByStudent(profile?.uid || '');
+  const quizzes = useMemo(() => dataStore.getQuizzes(), []);
+  const classes = useMemo(() => dataStore.getClasses(), []);
+  const subjects = useMemo(() => dataStore.getSubjects(), []);
+  const allLessons = useMemo(() => dataStore.getLessons(), []);
+  const studentSubs = useMemo(() => dataStore.getSubmissionsByStudent(profile?.uid || ''), [profile?.uid]);
+
+  // Filter video lessons for student's class
+  const videoLessons = useMemo(() => {
+    return allLessons.filter(
+      (l) =>
+        l.status === 'published' &&
+        Boolean(l.videoUrl) &&
+        (!profile?.classIds.length || l.classIds.some((cid) => profile.classIds.includes(cid)))
+    );
+  }, [allLessons, profile?.classIds]);
 
   // Filter quizzes for student's class
-  const classQuizzes = quizzes.filter(
-    (q) =>
-      q.status === 'published' &&
-      (!profile?.classIds.length || q.classIds.some((cid) => profile.classIds.includes(cid)))
-  );
+  const classQuizzes = useMemo(() => {
+    return quizzes.filter(
+      (q) =>
+        q.status === 'published' &&
+        (!profile?.classIds.length || q.classIds.some((cid) => profile.classIds.includes(cid)))
+    );
+  }, [quizzes, profile?.classIds]);
 
-  const primaryClass = profile?.classIds.length
-    ? dataStore.getClassById(profile.classIds[0])
-    : undefined;
+  const primaryClass = useMemo(() => {
+    return profile?.classIds.length ? dataStore.getClassById(profile.classIds[0]) : undefined;
+  }, [profile?.classIds]);
 
   const pendingCount = studentSubs.filter((s) => s.status === 'pending_manual').length;
 
@@ -141,6 +156,66 @@ export const StudentDashboard: React.FC = () => {
           <span className="text-xs text-slate-500 mt-1 block">Teacher grading in queue</span>
         </div>
       </div>
+
+      {/* Featured Video Lecture Notes Section */}
+      {videoLessons.length > 0 && (
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-base font-bold text-[#0F2A4A] dark:text-slate-100 flex items-center gap-2">
+                <Video className="w-5 h-5 text-red-600 fill-red-600" />
+                Featured Video Lecture Notes
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Teacher-curated video recordings and YouTube video lectures for your enrolled subjects
+              </p>
+            </div>
+            <Link
+              to="/lessons"
+              className="text-xs text-red-600 font-semibold hover:underline flex items-center gap-1"
+            >
+              <span>View all ({videoLessons.length})</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {videoLessons.slice(0, 3).map((lesson) => (
+              <Link
+                key={lesson.id}
+                to={`/lessons/${lesson.id}`}
+                className="group p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/50 hover:bg-white dark:hover:bg-slate-800 hover:border-red-300 dark:hover:border-red-900/60 hover:shadow-xs transition-all flex flex-col justify-between"
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 border border-blue-100 dark:border-blue-900">
+                      {getSubjectName(lesson.subjectId)}
+                    </span>
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-600 dark:text-red-400">
+                      <Play className="w-3 h-3 fill-current" /> YouTube Video
+                    </span>
+                  </div>
+
+                  <h3 className="text-sm font-bold text-[#0F2A4A] dark:text-slate-100 group-hover:text-red-600 transition-colors line-clamp-2">
+                    {lesson.videoTitle || lesson.title}
+                  </h3>
+
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
+                    {lesson.title}
+                  </p>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between text-xs text-red-600 font-semibold">
+                  <span className="inline-flex items-center gap-1.5">
+                    <Play className="w-3.5 h-3.5 fill-current" /> Watch Video Note
+                  </span>
+                  <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Two Column Layout: Assigned Quizzes & Recent Results */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

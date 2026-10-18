@@ -23,7 +23,7 @@ export const StudentQuizzesPage: React.FC = () => {
   const navigate = useNavigate();
   const [quizzes, setQuizzes] = useState<Quiz[]>(() => dataStore.getQuizzes());
   const [submissions, setSubmissions] = useState<Submission[]>(() => dataStore.getSubmissions());
-  const subjects = dataStore.getSubjects();
+  const subjects = React.useMemo(() => dataStore.getSubjects(), []);
 
   // Active Quiz Taker State
   const [activeQuiz, setActiveQuiz] = useState<Quiz | null>(null);

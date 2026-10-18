@@ -199,6 +199,9 @@ export const INITIAL_LESSONS: Lesson[] = [
     createdBy: 'demo-teacher-clara',
     createdAt: '2026-09-10T09:00:00Z',
     updatedAt: '2026-09-12T14:00:00Z',
+    videoUrl: 'https://www.youtube.com/watch?v=NybHckSEQBI',
+    videoType: 'youtube',
+    videoTitle: 'Introduction to Algebra & Combining Like Terms (Video Lecture)',
     attachments: [
       {
         name: 'Worked_Examples_Algebra_JSS1.pdf',
@@ -235,6 +238,9 @@ export const INITIAL_LESSONS: Lesson[] = [
     createdBy: 'demo-teacher-clara',
     createdAt: '2026-09-14T11:00:00Z',
     updatedAt: '2026-09-14T11:00:00Z',
+    videoUrl: 'https://www.youtube.com/watch?v=bMbmfx-TU3k',
+    videoType: 'youtube',
+    videoTitle: 'States of Matter: Solids, Liquids & Gases (Science Video Note)',
     attachments: [
       {
         name: 'Particle_Arrangement_Diagram.png',
@@ -268,6 +274,9 @@ export const INITIAL_LESSONS: Lesson[] = [
     createdBy: 'demo-admin-uid',
     createdAt: '2026-09-18T10:00:00Z',
     updatedAt: '2026-09-18T10:00:00Z',
+    videoUrl: 'https://www.youtube.com/watch?v=hNffLg9hCkk',
+    videoType: 'youtube',
+    videoTitle: 'Active vs. Passive Voice in English Syntax (Video Lesson)',
     attachments: [],
     bodyHtml: `
       <h2>Active and Passive Construction</h2>

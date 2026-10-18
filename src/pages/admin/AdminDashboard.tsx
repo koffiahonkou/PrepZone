@@ -13,6 +13,7 @@ import {
   PlusCircle,
   CheckCircle2,
   RefreshCw,
+  Video,
 } from 'lucide-react';
 import { useAuth } from '@/src/context/AuthContext';
 import { dataStore } from '@/src/services/dataStore';
@@ -21,11 +22,11 @@ import { toast } from 'sonner';
 export const AdminDashboard: React.FC = () => {
   const { profile } = useAuth();
 
-  const users = dataStore.getUsers();
-  const classes = dataStore.getClasses();
-  const quizzes = dataStore.getQuizzes();
-  const submissions = dataStore.getSubmissions();
-  const lessons = dataStore.getLessons();
+  const users = React.useMemo(() => dataStore.getUsers(), []);
+  const classes = React.useMemo(() => dataStore.getClasses(), []);
+  const quizzes = React.useMemo(() => dataStore.getQuizzes(), []);
+  const submissions = React.useMemo(() => dataStore.getSubmissions(), []);
+  const lessons = React.useMemo(() => dataStore.getLessons(), []);
 
   const activeStudents = users.filter((u) => u.role === 'student' && u.status === 'active').length;
   const pendingSubmissions = submissions.filter((s) => s.status === 'pending_manual');
@@ -93,6 +94,12 @@ export const AdminDashboard: React.FC = () => {
           >
             <RefreshCw className="w-3.5 h-3.5" /> Re-seed Sample Data
           </button>
+          <Link
+            to="/admin/lessons"
+            className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold shadow-xs transition-colors"
+          >
+            <Video className="w-4 h-4" /> Video Notes & Lessons
+          </Link>
           <Link
             to="/admin/users"
             className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold shadow-xs transition-colors"

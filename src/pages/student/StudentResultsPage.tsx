@@ -188,9 +188,9 @@ const CustomProgressTooltip: React.FC<CustomTooltipProps> = ({ active, payload, 
 export const StudentResultsPage: React.FC = () => {
   const { profile } = useAuth();
   const { isNight } = useColorMode();
-  const submissions = dataStore.getSubmissions();
-  const quizzes = dataStore.getQuizzes();
-  const subjects = dataStore.getSubjects();
+  const submissions = useMemo(() => dataStore.getSubmissions(), []);
+  const quizzes = useMemo(() => dataStore.getQuizzes(), []);
+  const subjects = useMemo(() => dataStore.getSubjects(), []);
 
   const [selectedSub, setSelectedSub] = useState<Submission | null>(null);
   const [activeCategoryFilter, setActiveCategoryFilter] = useState<string>('all');
@@ -670,7 +670,7 @@ export const StudentResultsPage: React.FC = () => {
         )}
 
         {/* Recharts Canvas */}
-        <div className="h-80 w-full pt-2">
+        <div className="h-80 w-full min-h-[320px] min-w-0">
           {timelineData.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 border border-dashed border-slate-200 dark:border-slate-700 rounded-xl p-6 text-center">
               <Award className="w-10 h-10 mb-2 opacity-40" />
@@ -680,7 +680,7 @@ export const StudentResultsPage: React.FC = () => {
               </p>
             </div>
           ) : chartViewMode === 'timeline' ? (
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height={300} minWidth={0} debounce={50}>
               <AreaChart
                 data={filteredTimelineData}
                 margin={{ top: 15, right: 20, left: -10, bottom: 25 }}
@@ -754,7 +754,7 @@ export const StudentResultsPage: React.FC = () => {
               </AreaChart>
             </ResponsiveContainer>
           ) : (
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height={300} minWidth={0} debounce={50}>
               <BarChart
                 data={categorySummary}
                 margin={{ top: 15, right: 20, left: -10, bottom: 25 }}
