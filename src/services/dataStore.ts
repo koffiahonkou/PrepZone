@@ -22,6 +22,7 @@ import {
   INITIAL_AUDIT_LOGS,
   INITIAL_SETTINGS,
 } from './sampleData';
+import { assertValidQuiz } from './quizValidator';
 
 const STORAGE_KEYS = {
   USERS: 'eduform_store_users',
@@ -336,14 +337,33 @@ class DataStore {
   }
 
   public saveQuiz(quiz: Quiz): void {
+    // Enforce quiz validation before saving to the database
+    const validation = assertValidQuiz(quiz);
+    const normalizedQuiz: Quiz = {
+      ...quiz,
+      totalMarks: validation.totalMarks,
+    };
     const quizzes = this.getQuizzes();
-    const idx = quizzes.findIndex((q) => q.id === quiz.id);
+    const idx = quizzes.findIndex((q) => q.id === normalizedQuiz.id);
     if (idx >= 0) {
-      quizzes[idx] = quiz;
+      quizzes[idx] = normalizedQuiz;
     } else {
-      quizzes.unshift(quiz);
+      quizzes.unshift(normalizedQuiz);
     }
     saveStore(STORAGE_KEYS.QUIZZES, quizzes);
+
+    // Sync to Firestore if online / enabled
+    try {
+      import('@/src/lib/firebase').then(({ db }) => {
+        import('firebase/firestore').then(({ doc, setDoc }) => {
+          setDoc(doc(db, 'quizzes', normalizedQuiz.id), normalizedQuiz).catch((err) => {
+            console.warn('Firestore quiz sync deferred/offline:', err);
+          });
+        });
+      });
+    } catch {
+      // safe fallback
+    }
   }
 
   public deleteQuiz(id: string): void {

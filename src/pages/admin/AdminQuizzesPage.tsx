@@ -16,10 +16,14 @@ import {
   ArrowDown,
   Layers,
   Sparkles,
+  ShieldCheck,
+  AlertCircle,
+  ListChecks,
 } from 'lucide-react';
 import { dataStore } from '@/src/services/dataStore';
 import { Quiz, QuizQuestion, QuestionType, QuestionOption } from '@/src/types';
 import { RichTextEditor } from '@/src/components/common/RichTextEditor';
+import { validateQuiz, QuizValidationResult, QuizValidationError } from '@/src/services/quizValidator';
 import { toast } from 'sonner';
 
 export type SectionKey = 'multiple_choice' | 'true_false' | 'short_text' | 'theory';
@@ -135,6 +139,8 @@ export const AdminQuizzesPage: React.FC = () => {
   const [formPassMark, setFormPassMark] = useState(50);
   const [formStatus, setFormStatus] = useState<'draft' | 'published' | 'closed'>('published');
   const [formQuestions, setFormQuestions] = useState<QuizQuestion[]>([]);
+  const [validationResult, setValidationResult] = useState<QuizValidationResult | null>(null);
+  const [showValidationModal, setShowValidationModal] = useState<boolean>(false);
 
   const [activeSectionFilter, setActiveSectionFilter] = useState<'all' | SectionKey>('all');
   const [batchCountInputs, setBatchCountInputs] = useState<Record<SectionKey, number>>({
@@ -159,6 +165,8 @@ export const AdminQuizzesPage: React.FC = () => {
 
   const openAddModal = () => {
     setEditingQuiz(null);
+    setValidationResult(null);
+    setShowValidationModal(false);
     setFormTitle('');
     setFormDescription('');
     setFormSubjectId(subjects[0]?.id || '');
@@ -252,6 +260,8 @@ export const AdminQuizzesPage: React.FC = () => {
 
   const openEditModal = (quiz: Quiz) => {
     setEditingQuiz(quiz);
+    setValidationResult(null);
+    setShowValidationModal(false);
     setFormTitle(quiz.title);
     setFormDescription(quiz.description);
     setFormSubjectId(quiz.subjectId);
@@ -276,33 +286,51 @@ export const AdminQuizzesPage: React.FC = () => {
     toast.success(`Quiz duplicated as "${duplicated.title}".`);
   };
 
+  const handleValidateQuiz = () => {
+    const candidate: Partial<Quiz> = {
+      title: formTitle.trim(),
+      description: formDescription.trim(),
+      subjectId: formSubjectId,
+      classIds: formClassIds,
+      questions: formQuestions,
+      totalMarks: formQuestions.reduce((acc, q) => acc + (q.marks || 0), 0),
+    };
+
+    const res = validateQuiz(candidate);
+    setValidationResult(res);
+    setShowValidationModal(true);
+
+    if (res.isValid) {
+      toast.success(
+        `Quiz is valid! All ${formQuestions.length} questions have correct options assigned and total marks (${res.totalMarks}) are explicitly defined.`
+      );
+    } else {
+      toast.error(res.error || `Validation found ${res.errors.length} issue(s).`);
+    }
+  };
+
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formTitle.trim()) {
-      toast.error('Quiz title is required.');
-      return;
-    }
-    if (formClassIds.length === 0) {
-      toast.error('Assign at least one class stream.');
-      return;
-    }
-    if (formQuestions.length === 0) {
-      toast.error('Add at least one question to the assessment.');
+
+    const candidate: Partial<Quiz> = {
+      title: formTitle.trim(),
+      description: formDescription.trim(),
+      subjectId: formSubjectId,
+      classIds: formClassIds,
+      questions: formQuestions,
+    };
+
+    // Run the Validate Quiz helper function
+    const validation = validateQuiz(candidate);
+    setValidationResult(validation);
+
+    if (!validation.isValid) {
+      setShowValidationModal(true);
+      toast.error(validation.error || 'Please resolve quiz validation errors before saving to the database.');
       return;
     }
 
-    // Validate that objective questions have a selected correct answer
-    for (let i = 0; i < formQuestions.length; i++) {
-      const q = formQuestions[i];
-      if (q.type === 'single_choice' || q.type === 'true_false') {
-        if (!q.correctOptionIds || q.correctOptionIds.length === 0) {
-          toast.error(`Question ${i + 1} is missing a selected correct answer. Please click a radio button.`);
-          return;
-        }
-      }
-    }
-
-    const totalMarks = formQuestions.reduce((acc, q) => acc + (q.marks || 0), 0);
+    const totalMarks = validation.totalMarks;
 
     if (editingQuiz) {
       const updated: Quiz = {
@@ -321,7 +349,7 @@ export const AdminQuizzesPage: React.FC = () => {
         totalMarks,
       };
       dataStore.saveQuiz(updated);
-      toast.success(`Quiz "${updated.title}" updated.`);
+      toast.success(`Quiz "${updated.title}" validated and updated successfully (${totalMarks} marks).`);
     } else {
       const newQuiz: Quiz = {
         id: `quiz-${Date.now()}`,
@@ -347,7 +375,7 @@ export const AdminQuizzesPage: React.FC = () => {
         createdAt: new Date().toISOString(),
       };
       dataStore.saveQuiz(newQuiz);
-      toast.success(`Quiz "${newQuiz.title}" created with ${formQuestions.length} questions.`);
+      toast.success(`Quiz "${newQuiz.title}" validated and created with ${formQuestions.length} questions (${totalMarks} marks).`);
     }
 
     setQuizzes(dataStore.getQuizzes());
@@ -854,14 +882,44 @@ export const AdminQuizzesPage: React.FC = () => {
               <div className="pt-4 border-t border-slate-200">
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 mb-4">
                   <div>
-                    <h4 className="text-sm font-bold text-[#0F2A4A] uppercase tracking-wider flex items-center gap-2">
-                      <Layers className="w-4 h-4 text-emerald-600" /> Assessment Sections & Questions ({formQuestions.length})
-                    </h4>
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm font-bold text-[#0F2A4A] uppercase tracking-wider flex items-center gap-2">
+                        <Layers className="w-4 h-4 text-emerald-600" /> Assessment Sections & Questions ({formQuestions.length})
+                      </h4>
+                      <button
+                        type="button"
+                        onClick={handleValidateQuiz}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 transition-colors cursor-pointer shadow-2xs"
+                        title="Run 'Validate Quiz' helper to check question options and total marks"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Validate Quiz</span>
+                      </button>
+                    </div>
                     <p className="text-xs text-slate-500 mt-0.5">
                       Each section supports adding multiple questions. Total assessment score:{' '}
                       <strong className="text-emerald-700 font-bold">
                         {formQuestions.reduce((acc, q) => acc + (q.marks || 0), 0)} Marks
                       </strong>
+                      {validationResult && (
+                        <span
+                          className={`ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            validationResult.isValid
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-rose-100 text-rose-800'
+                          }`}
+                        >
+                          {validationResult.isValid ? (
+                            <>
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Validated
+                            </>
+                          ) : (
+                            <>
+                              <AlertTriangle className="w-3 h-3 text-rose-600" /> {validationResult.errors.length} Issue{validationResult.errors.length > 1 ? 's' : ''}
+                            </>
+                          )}
+                        </span>
+                      )}
                     </p>
                   </div>
 
@@ -1198,6 +1256,21 @@ export const AdminQuizzesPage: React.FC = () => {
                                     </div>
                                   </div>
 
+                                  {/* Question-level validation error alerts */}
+                                  {validationResult?.questionErrors[q.id] && (
+                                    <div className="mb-3 p-3 rounded-xl bg-rose-50 border border-rose-300 text-rose-900 text-xs flex items-start gap-2.5">
+                                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                                      <div>
+                                        <span className="font-bold block">Validation Alert:</span>
+                                        <ul className="list-disc list-inside space-y-0.5 mt-0.5">
+                                          {validationResult.questionErrors[q.id].map((err, errIdx) => (
+                                            <li key={errIdx}>{err}</li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    </div>
+                                  )}
+
                                   {/* Question Prompt with RichTextEditor */}
                                   <div className="mb-4">
                                     <RichTextEditor
@@ -1519,22 +1592,146 @@ export const AdminQuizzesPage: React.FC = () => {
               </div>
 
               {/* Submit Buttons */}
-              <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                  onClick={handleValidateQuiz}
+                  className="px-3.5 py-2.5 rounded-lg text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
                 >
-                  Cancel
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  <span>Validate Quiz</span>
                 </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-lg text-xs font-semibold bg-[#0F2A4A] hover:bg-[#163c68] text-white shadow-xs"
-                >
-                  {editingQuiz ? 'Save Quiz Changes' : 'Create & Publish Quiz'}
-                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-4 py-2.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 rounded-lg text-xs font-semibold bg-[#0F2A4A] hover:bg-[#163c68] text-white shadow-xs flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Check className="w-4 h-4 text-emerald-400" />
+                    <span>{editingQuiz ? 'Save Quiz Changes' : 'Create & Publish Quiz'}</span>
+                  </button>
+                </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Quiz Validation Report Dialog */}
+      {showValidationModal && validationResult && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                    validationResult.isValid
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : 'bg-rose-100 text-rose-700'
+                  }`}
+                >
+                  {validationResult.isValid ? (
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                  ) : (
+                    <AlertTriangle className="w-5 h-5 text-rose-600" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[#0F2A4A]">Quiz Assessment Validation</h3>
+                  <p className="text-xs text-slate-500">
+                    {validationResult.isValid
+                      ? 'All validation checks passed successfully.'
+                      : `${validationResult.errors.length} issue(s) detected before saving.`}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowValidationModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Checklist Overview */}
+            <div className="my-4 space-y-2.5 text-xs">
+              <div
+                className={`p-3 rounded-xl border flex items-start gap-2.5 ${
+                  validationResult.isValid
+                    ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+                    : 'bg-slate-50 border-slate-200 text-slate-800'
+                }`}
+              >
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold">Total Marks Explicitly Defined:</span>
+                  <p className="text-slate-600 mt-0.5">
+                    Calculated Total: <strong className="text-emerald-700 font-bold">{validationResult.totalMarks} Marks</strong> across {formQuestions.length} questions.
+                  </p>
+                </div>
+              </div>
+
+              <div
+                className={`p-3 rounded-xl border flex items-start gap-2.5 ${
+                  validationResult.detailedErrors.some((e) => e.field === 'correctOption')
+                    ? 'bg-rose-50 border-rose-200 text-rose-900'
+                    : 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+                }`}
+              >
+                {validationResult.detailedErrors.some((e) => e.field === 'correctOption') ? (
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                )}
+                <div>
+                  <span className="font-bold">Correct Options Assigned:</span>
+                  <p className="text-slate-600 mt-0.5">
+                    {validationResult.detailedErrors.some((e) => e.field === 'correctOption')
+                      ? 'One or more objective questions are missing selected correct answer options.'
+                      : 'All choice and objective questions have at least one verified correct answer assigned.'}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Error List if Invalid */}
+            {!validationResult.isValid && (
+              <div className="max-h-60 overflow-y-auto space-y-2 p-3 bg-rose-50/60 border border-rose-200 rounded-xl mb-4">
+                <span className="text-xs font-bold text-rose-800 uppercase tracking-wider block">
+                  Actionable Issues to Resolve:
+                </span>
+                <ul className="space-y-1.5 text-xs text-rose-700">
+                  {validationResult.errors.map((err, idx) => (
+                    <li key={idx} className="flex items-start gap-1.5">
+                      <span className="font-bold text-rose-600 shrink-0">•</span>
+                      <span>{err}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowValidationModal(false)}
+                className={`px-4 py-2 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
+                  validationResult.isValid
+                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                    : 'bg-[#0F2A4A] hover:bg-[#163c68] text-white'
+                }`}
+              >
+                {validationResult.isValid ? 'Looks Great, Return to Editor' : 'Return to Editor to Fix'}
+              </button>
+            </div>
           </div>
         </div>
       )}
