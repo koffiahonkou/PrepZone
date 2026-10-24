@@ -396,15 +396,45 @@ class DataStore {
     return this.getSubmissions().filter((s) => s.userId === userId);
   }
 
-  public saveSubmission(submission: Submission): void {
+  public hasStudentSubmittedQuiz(userId: string, quizId: string): boolean {
+    return this.getSubmissions().some((s) => s.userId === userId && s.quizId === quizId);
+  }
+
+  public saveSubmission(submission: Submission): boolean {
     const subs = this.getSubmissions();
     const idx = subs.findIndex((s) => s.id === submission.id);
     if (idx >= 0) {
+      // Existing submission being updated (e.g., teacher grading theory or feedback)
       subs[idx] = submission;
     } else {
+      // Strict rule: No student can submit a quiz they have already submitted
+      const alreadySubmitted = subs.some(
+        (s) => s.userId === submission.userId && s.quizId === submission.quizId
+      );
+      if (alreadySubmitted) {
+        console.warn(
+          `[EduForm Security] Submission blocked: Student "${submission.userId}" has already submitted quiz "${submission.quizId}". Retakes are strictly prohibited.`
+        );
+        return false;
+      }
       subs.unshift(submission);
     }
     saveStore(STORAGE_KEYS.SUBMISSIONS, subs);
+
+    // Sync to Firestore if online / enabled
+    try {
+      import('@/src/lib/firebase').then(({ db }) => {
+        import('firebase/firestore').then(({ doc, setDoc }) => {
+          setDoc(doc(db, 'submissions', submission.id), submission).catch((err) => {
+            console.warn('Firestore submission sync deferred/offline:', err);
+          });
+        });
+      });
+    } catch {
+      // safe fallback
+    }
+
+    return true;
   }
 
   // --- Notifications ---

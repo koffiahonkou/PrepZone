@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Bell,
   AlertCircle,
@@ -36,7 +37,34 @@ export const AdminNotificationsPage: React.FC = () => {
   const classes = dataStore.getClasses();
 
   // Filter state
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'scheduled' | 'expired'>('all');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialFilter = searchParams.get('filter');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'scheduled' | 'expired' | 'old_reactivation'>(() => {
+    if (initialFilter === 'old_reactivation' || initialFilter === 'expired' || initialFilter === 'active' || initialFilter === 'scheduled') {
+      return initialFilter;
+    }
+    return 'all';
+  });
+
+  const [reactivatingNotif, setReactivatingNotif] = useState<AppNotification | null>(null);
+  const [reactivateStartDate, setReactivateStartDate] = useState('');
+  const [reactivateEndDate, setReactivateEndDate] = useState('');
+  const [reactivateAutoDisappear, setReactivateAutoDisappear] = useState(true);
+
+  const isNotificationOldForReactivation = (n: AppNotification) => {
+    const avail = getAnnouncementAvailability(n);
+    return (
+      avail.state === 'expired' ||
+      avail.isExpired ||
+      avail.shouldDisappearFromDashboard ||
+      Boolean(n.endDate && new Date(n.endDate).getTime() < Date.now()) ||
+      Boolean(n.expiresAt && new Date(n.expiresAt).getTime() < Date.now()) ||
+      n.status === 'expired' ||
+      n.status === 'archived'
+    );
+  };
+
+  const oldNotifsCount = notifications.filter(isNotificationOldForReactivation).length;
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -166,6 +194,34 @@ export const AdminNotificationsPage: React.FC = () => {
     toast.success(`Extended announcement "${notif.title}" by 7 days.`);
   };
 
+  const openReactivateModal = (notif: AppNotification) => {
+    const now = new Date();
+    const oneWeekLater = new Date(Date.now() + 7 * 24 * 3600 * 1000);
+    setReactivatingNotif(notif);
+    setReactivateStartDate(now.toISOString().slice(0, 16));
+    setReactivateEndDate(oneWeekLater.toISOString().slice(0, 16));
+    setReactivateAutoDisappear(notif.autoDisappear ?? true);
+  };
+
+  const handleSaveAnnouncementReactivation = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reactivatingNotif) return;
+
+    const updated: AppNotification = {
+      ...reactivatingNotif,
+      startDate: reactivateStartDate || null,
+      endDate: reactivateEndDate || null,
+      expiresAt: reactivateEndDate || null,
+      autoDisappear: reactivateAutoDisappear,
+      status: 'published',
+    };
+
+    dataStore.saveNotification(updated);
+    setNotifications(dataStore.getNotifications());
+    setReactivatingNotif(null);
+    toast.success(`Announcement "${updated.title}" reactivated and broadcasted.`);
+  };
+
   const toggleClass = (cid: string) => {
     setFormClassIds((prev) =>
       prev.includes(cid) ? prev.filter((id) => id !== cid) : [...prev, cid]
@@ -208,6 +264,12 @@ export const AdminNotificationsPage: React.FC = () => {
             count: notifications.filter((n) => getAnnouncementAvailability(n).state === 'scheduled').length,
           },
           {
+            key: 'old_reactivation',
+            label: 'Old Notices (For Reactivation)',
+            count: oldNotifsCount,
+            isSpecial: true,
+          },
+          {
             key: 'expired',
             label: 'Expired / Disappeared',
             count: notifications.filter((n) => getAnnouncementAvailability(n).state === 'expired').length,
@@ -218,17 +280,27 @@ export const AdminNotificationsPage: React.FC = () => {
             <button
               key={tab.key}
               type="button"
-              onClick={() => setStatusFilter(tab.key as any)}
+              onClick={() => {
+                setStatusFilter(tab.key as any);
+                setSearchParams(tab.key === 'all' ? {} : { filter: tab.key });
+              }}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all flex items-center gap-2 cursor-pointer ${
                 isActive
                   ? 'bg-[#0F2A4A] text-white border-[#0F2A4A] shadow-xs'
+                  : tab.isSpecial
+                  ? 'bg-indigo-50/70 text-indigo-800 border-indigo-200 hover:bg-indigo-100'
                   : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
               }`}
             >
+              {tab.isSpecial && <RotateCcw className="w-3.5 h-3.5 text-indigo-600" />}
               <span>{tab.label}</span>
               <span
                 className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-                  isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
+                  isActive
+                    ? 'bg-white/20 text-white'
+                    : tab.isSpecial
+                    ? 'bg-indigo-200 text-indigo-900'
+                    : 'bg-slate-100 text-slate-700'
                 }`}
               >
                 {tab.count}
@@ -238,11 +310,32 @@ export const AdminNotificationsPage: React.FC = () => {
         })}
       </div>
 
+      {/* Old Announcements Guidance Banner */}
+      {statusFilter === 'old_reactivation' && (
+        <div className="p-4 bg-indigo-50/80 border border-indigo-200 rounded-xl text-xs text-indigo-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+          <div className="flex items-start gap-2.5">
+            <RotateCcw className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold text-sm text-indigo-950">
+                Old Announcements Reactivation Center ({oldNotifsCount} past notices)
+              </p>
+              <p className="text-xs text-indigo-800 mt-0.5">
+                These notices have reached their expiration date or disappeared from the student dashboard. Click <strong>"Reactivate Notice"</strong> to set new broadcast dates or use <strong>"Extend +7d"</strong> for an instant 1-week renewal.
+              </p>
+            </div>
+          </div>
+          <span className="shrink-0 text-[11px] font-semibold text-indigo-800 bg-white px-3 py-1.5 rounded-lg border border-indigo-200 shadow-2xs">
+            Filtering Old Notices
+          </span>
+        </div>
+      )}
+
       {/* Announcements List */}
       <div className="space-y-4">
         {notifications
           .filter((n) => {
             if (statusFilter === 'all') return true;
+            if (statusFilter === 'old_reactivation') return isNotificationOldForReactivation(n);
             const avail = getAnnouncementAvailability(n);
             if (statusFilter === 'active') return avail.state === 'active';
             if (statusFilter === 'scheduled') return avail.state === 'scheduled';
@@ -369,14 +462,24 @@ export const AdminNotificationsPage: React.FC = () => {
 
                 <div className="text-right shrink-0 flex flex-col items-end gap-2.5 w-full md:w-auto">
                   <div className="flex items-center gap-1">
+                    {isNotificationOldForReactivation(n) && (
+                      <button
+                        type="button"
+                        onClick={() => openReactivateModal(n)}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#0F2A4A] hover:bg-[#163c68] text-white shadow-2xs transition-colors cursor-pointer mr-1"
+                        title="Reactivate notice with fresh broadcasting schedule dates"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5 text-emerald-400" /> Reactivate Notice
+                      </button>
+                    )}
                     {avail.state === 'expired' && (
                       <button
                         type="button"
                         onClick={() => handleExtendSevenDays(n)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 transition-colors cursor-pointer mr-1"
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 transition-colors cursor-pointer mr-1"
                         title="Extend announcement for another 7 days"
                       >
-                        <RotateCcw className="w-3 h-3 text-emerald-600" /> Extend +7d
+                        <RotateCcw className="w-3 h-3 text-emerald-600" /> +7d
                       </button>
                     )}
                     <button
@@ -404,6 +507,30 @@ export const AdminNotificationsPage: React.FC = () => {
               </div>
             );
           })}
+
+        {notifications.filter((n) => {
+          if (statusFilter === 'all') return true;
+          if (statusFilter === 'old_reactivation') return isNotificationOldForReactivation(n);
+          const avail = getAnnouncementAvailability(n);
+          if (statusFilter === 'active') return avail.state === 'active';
+          if (statusFilter === 'scheduled') return avail.state === 'scheduled';
+          if (statusFilter === 'expired') return avail.state === 'expired';
+          return true;
+        }).length === 0 && (
+          <div className="bg-white p-8 rounded-xl border border-dashed border-slate-300 text-center text-slate-500">
+            <RotateCcw className="w-10 h-10 text-slate-400 mx-auto mb-2 opacity-50" />
+            <h3 className="text-sm font-bold text-slate-700">
+              {statusFilter === 'old_reactivation'
+                ? 'No Old Announcements Found for Reactivation'
+                : 'No Announcements Found in This Filter'}
+            </h3>
+            <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+              {statusFilter === 'old_reactivation'
+                ? 'All existing notices are currently active or scheduled. When announcements expire or disappear from student view, they will appear here ready to reactivate.'
+                : 'Try switching to another filter tab above or post a new announcement.'}
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Add / Edit Announcement Modal */}
@@ -573,6 +700,131 @@ export const AdminNotificationsPage: React.FC = () => {
                 Confirm Delete
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reactivate Announcement Modal */}
+      {reactivatingNotif && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 my-auto">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-indigo-50 text-indigo-700 rounded-xl">
+                  <RotateCcw className="w-5 h-5 text-indigo-600" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[#0F2A4A]">Reactivate Announcement</h3>
+                  <p className="text-xs text-slate-500">Restore notice visibility for students</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReactivatingNotif(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-md"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveAnnouncementReactivation} className="p-5 space-y-4">
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+                <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Target Notice</span>
+                <p className="font-bold text-slate-800 text-sm">{reactivatingNotif.title}</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5">
+                  Reactivation Broadcast Start
+                </label>
+                <input
+                  type="datetime-local"
+                  required
+                  value={reactivateStartDate}
+                  onChange={(e) => setReactivateStartDate(e.target.value)}
+                  className="w-full px-3.5 py-2 text-xs border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5">
+                  Expiration / End Date
+                </label>
+                <input
+                  type="datetime-local"
+                  required
+                  value={reactivateEndDate}
+                  onChange={(e) => setReactivateEndDate(e.target.value)}
+                  className="w-full px-3.5 py-2 text-xs border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              {/* Quick Presets */}
+              <div className="flex items-center gap-2 pt-1">
+                <span className="text-[11px] font-medium text-slate-500">Quick Presets:</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const now = new Date();
+                    setReactivateStartDate(now.toISOString().slice(0, 16));
+                    setReactivateEndDate(new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().slice(0, 16));
+                  }}
+                  className="px-2.5 py-1 text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md transition-colors"
+                >
+                  +7 Days
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const now = new Date();
+                    setReactivateStartDate(now.toISOString().slice(0, 16));
+                    setReactivateEndDate(new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString().slice(0, 16));
+                  }}
+                  className="px-2.5 py-1 text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md transition-colors"
+                >
+                  +14 Days
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const now = new Date();
+                    setReactivateStartDate(now.toISOString().slice(0, 16));
+                    setReactivateEndDate(new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString().slice(0, 16));
+                  }}
+                  className="px-2.5 py-1 text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md transition-colors"
+                >
+                  +30 Days
+                </button>
+              </div>
+
+              <div className="pt-2 flex items-center justify-between">
+                <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={reactivateAutoDisappear}
+                    onChange={(e) => setReactivateAutoDisappear(e.target.checked)}
+                    className="w-4 h-4 text-emerald-600 rounded border-slate-300"
+                  />
+                  <span>Auto-disappear after new end date</span>
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setReactivatingNotif(null)}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold border border-slate-300 hover:bg-slate-50 text-slate-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-lg text-xs font-semibold bg-[#0F2A4A] hover:bg-[#163c68] text-white shadow-xs transition-colors flex items-center gap-1.5"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" /> Reactivate & Broadcast
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

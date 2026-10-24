@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { Quiz, QuizQuestion, Submission, SubmissionAnswer } from '@/src/types';
 import { SECTION_DEFS, getQuestionSectionKey } from '@/src/pages/admin/AdminQuizzesPage';
+import { QuizSubmissionCelebration } from '@/src/components/quizzes/QuizSubmissionCelebration';
 import { toast } from 'sonner';
 
 interface QuizStudentPreviewModalProps {
@@ -312,66 +313,13 @@ export const QuizStudentPreviewModal: React.FC<QuizStudentPreviewModalProps> = (
 
             {/* Content: Either Submission Result Review or Interactive Question Taking Form */}
             {submittedResult ? (
-              /* SIMULATED SUBMISSION RESULT REVIEW SCREEN */
+              /* SIMULATED SUBMISSION RESULT REVIEW SCREEN WITH CELEBRATORY ANIMATION */
               <div className="p-6 sm:p-8 space-y-6">
-                <div className="text-center p-6 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
-                  <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 mx-auto flex items-center justify-center">
-                    <CheckCircle2 className="w-7 h-7" />
-                  </div>
-                  <h3 className="text-xl font-serif font-bold text-[#0F2A4A]">
-                    Simulated Assessment Completed!
-                  </h3>
-                  <p className="text-xs text-slate-500 max-w-md mx-auto">
-                    This demonstrates the exact grading and review experience students will receive after submitting their test.
-                  </p>
-                </div>
-
-                {/* Score Summary Metrics */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 bg-slate-50 rounded-xl border border-slate-200 text-center">
-                  <div>
-                    <span className="text-2xl font-bold text-slate-800 block">
-                      {submittedResult.totalScore} / {submittedResult.totalPossible}
-                    </span>
-                    <span className="text-xs font-semibold text-slate-500">Auto Marks Scored</span>
-                  </div>
-
-                  <div>
-                    <span className="text-2xl font-extrabold text-emerald-600 block">
-                      {submittedResult.percent}%
-                    </span>
-                    <span className="text-xs font-semibold text-slate-500">
-                      {submittedResult.percent >= (quiz.settings?.passMarkPercent || 50)
-                        ? 'Passed'
-                        : 'Below Pass Mark'}
-                    </span>
-                  </div>
-
-                  <div>
-                    <span className="text-xs font-bold uppercase tracking-wider block text-slate-700">
-                      Submission State
-                    </span>
-                    <span
-                      className={`inline-flex items-center gap-1 mt-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                        submittedResult.status === 'pending_manual'
-                          ? 'bg-amber-100 text-amber-800'
-                          : 'bg-emerald-100 text-emerald-800'
-                      }`}
-                    >
-                      {submittedResult.status === 'pending_manual'
-                        ? 'Pending Theory Marks'
-                        : 'Fully Auto-Graded'}
-                    </span>
-                  </div>
-                </div>
-
-                {submittedResult.status === 'pending_manual' && (
-                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2.5">
-                    <Clock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                    <span>
-                      <strong>Theory Questions Queued:</strong> Objective questions were auto-graded immediately ({submittedResult.autoScore}/{submittedResult.autoTotal} marks). Extended essay responses are marked manually by the instructor.
-                    </span>
-                  </div>
-                )}
+                <QuizSubmissionCelebration
+                  submission={submittedResult}
+                  quiz={quiz}
+                  onDone={handleResetSandbox}
+                />
 
                 {/* Question by Question Answer Review */}
                 <div className="space-y-4">

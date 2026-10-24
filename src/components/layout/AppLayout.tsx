@@ -121,6 +121,7 @@ export const AppLayout: React.FC = () => {
   ];
 
   const teacherNavItems: NavItem[] = [
+    { label: 'Teacher Dashboard', to: '/dashboard', icon: Home, end: true },
     { label: 'Lesson Notes', to: '/admin/lessons', icon: BookOpen },
     { label: 'Quiz Builder', to: '/admin/quizzes', icon: FileQuestion },
     { label: 'Submissions Queue', to: '/admin/submissions', icon: ClipboardList },

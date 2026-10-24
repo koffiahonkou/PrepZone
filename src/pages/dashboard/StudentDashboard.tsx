@@ -242,14 +242,18 @@ export const StudentDashboard: React.FC = () => {
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-              Available Quizzes
+              Pending Quizzes
             </span>
             <span className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
               <FileQuestion className="w-4 h-4" />
             </span>
           </div>
-          <p className="text-xl font-bold text-emerald-600 mt-2">{classQuizzes.length} Active</p>
-          <span className="text-xs text-slate-500 mt-1 block">Assigned to your stream</span>
+          <p className="text-xl font-bold text-emerald-600 mt-2">
+            {classQuizzes.filter((q) => !studentSubs.some((s) => s.quizId === q.id)).length} Ready to Take
+          </p>
+          <span className="text-xs text-slate-500 mt-1 block">
+            {studentSubs.length} submitted • No retakes
+          </span>
         </div>
 
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs">
@@ -370,6 +374,9 @@ export const StudentDashboard: React.FC = () => {
               ) : (
                 classQuizzes.map((quiz) => {
                   const avail = getQuizAvailability(quiz);
+                  const pastSub = studentSubs.find((s) => s.quizId === quiz.id);
+                  const isSubmitted = !!pastSub;
+
                   return (
                     <div
                       key={quiz.id}
@@ -381,19 +388,22 @@ export const StudentDashboard: React.FC = () => {
                             {getSubjectName(quiz.subjectId)}
                           </span>
 
-                          {avail.state === 'active' && (
+                          {isSubmitted ? (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 flex items-center gap-1">
+                              <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" />
+                              Completed ({pastSub.percent}%)
+                            </span>
+                          ) : avail.state === 'active' ? (
                             <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 flex items-center gap-1">
                               <Clock className="w-2.5 h-2.5 text-emerald-600" />
                               Closes in {avail.timeRemainingFormatted}
                             </span>
-                          )}
-
-                          {avail.state === 'scheduled' && (
+                          ) : avail.state === 'scheduled' ? (
                             <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 flex items-center gap-1">
                               <Calendar className="w-2.5 h-2.5 text-blue-600" />
                               Opens in {avail.timeUntilStartFormatted}
                             </span>
-                          )}
+                          ) : null}
 
                           <span className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 flex items-center gap-0.5">
                             <Tag className="w-2.5 h-2.5 text-indigo-500" />
@@ -412,7 +422,15 @@ export const StudentDashboard: React.FC = () => {
                       </div>
 
                       <div className="shrink-0 ml-2">
-                        {avail.isAvailableForStudent ? (
+                        {isSubmitted ? (
+                          <Link
+                            to="/results"
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 transition-colors inline-flex items-center gap-1 shadow-2xs"
+                            title="Assessment already submitted. Retakes are not permitted."
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Review Grade
+                          </Link>
+                        ) : avail.isAvailableForStudent ? (
                           <Link
                             to="/quizzes"
                             className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-[#0F2A4A] text-white hover:bg-emerald-600 transition-colors inline-block text-center shadow-2xs"

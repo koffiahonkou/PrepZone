@@ -8,7 +8,7 @@ import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import { RoleRoute } from './components/auth/RoleRoute';
 import { AppLayout } from './components/layout/AppLayout';
 import { LoginPage } from './pages/auth/LoginPage';
-import { StudentDashboard } from './pages/dashboard/StudentDashboard';
+import { DashboardRouter } from './pages/dashboard/DashboardRouter';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { AdminUsersPage } from './pages/admin/AdminUsersPage';
 import { AdminClassesPage } from './pages/admin/AdminClassesPage';
@@ -52,8 +52,9 @@ export default function App() {
                 </ProtectedRoute>
               }
             >
-              {/* Student / Common Authenticated Routes */}
-              <Route path="/dashboard" element={<StudentDashboard />} />
+              {/* Common Authenticated Routes with Role-Aware Dashboards */}
+              <Route path="/dashboard" element={<DashboardRouter />} />
+              <Route path="/teacher" element={<DashboardRouter />} />
               <Route path="/lessons" element={<StudentLessonsPage />} />
               <Route path="/lessons/:id" element={<StudentLessonsPage />} />
               <Route path="/quizzes" element={<StudentQuizzesPage />} />

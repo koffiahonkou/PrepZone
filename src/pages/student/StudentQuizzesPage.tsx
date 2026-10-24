@@ -14,17 +14,20 @@ import {
   Calendar,
   Lock,
   Tag,
+  ShieldAlert,
 } from 'lucide-react';
 import { dataStore } from '@/src/services/dataStore';
 import { useAuth } from '@/src/context/AuthContext';
 import { Quiz, Submission, SubmissionAnswer } from '@/src/types';
 import { SECTION_DEFS, getQuestionSectionKey } from '@/src/pages/admin/AdminQuizzesPage';
 import { getQuizAvailability, formatQuizDateTime } from '@/src/utils/quizAvailability';
+import { QuizSubmissionCelebration } from '@/src/components/quizzes/QuizSubmissionCelebration';
 import { toast } from 'sonner';
 
 export const StudentQuizzesPage: React.FC = () => {
   const { profile } = useAuth();
   const navigate = useNavigate();
+  const reviewSectionRef = React.useRef<HTMLDivElement>(null);
   const [quizzes, setQuizzes] = useState<Quiz[]>(() => dataStore.getQuizzes());
   const [submissions, setSubmissions] = useState<Submission[]>(() => dataStore.getSubmissions());
   const subjects = React.useMemo(() => dataStore.getSubjects(), []);
@@ -55,6 +58,13 @@ export const StudentQuizzesPage: React.FC = () => {
   };
 
   const handleStartQuiz = (quiz: Quiz) => {
+    // 1. Strict single-attempt policy: No student can retake a quiz already submitted
+    const existingSub = getStudentSubmission(quiz.id);
+    if (existingSub) {
+      toast.error('You have already submitted this assessment. Retakes are strictly prohibited.');
+      return;
+    }
+
     const avail = getQuizAvailability(quiz);
     if (!avail.isAvailableForStudent) {
       toast.error(avail.message);
@@ -75,6 +85,14 @@ export const StudentQuizzesPage: React.FC = () => {
   const handleSubmitQuiz = (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeQuiz) return;
+
+    // Strict safeguard: verify no submission exists
+    const existingSub = getStudentSubmission(activeQuiz.id);
+    if (existingSub) {
+      toast.error('You have already submitted this assessment. Multiple submissions are not permitted.');
+      setActiveQuiz(null);
+      return;
+    }
 
     // Run Pass 1 Auto-Grading immediately
     let autoScore = 0;
@@ -159,7 +177,13 @@ export const StudentQuizzesPage: React.FC = () => {
       gradedAt: hasTheory ? null : new Date().toISOString(),
     };
 
-    dataStore.saveSubmission(newSubmission);
+    const saved = dataStore.saveSubmission(newSubmission);
+    if (!saved) {
+      toast.error('Assessment has already been submitted. Retakes are not permitted.');
+      setActiveQuiz(null);
+      return;
+    }
+
     setSubmissions(dataStore.getSubmissions());
     setSubmittedResult(newSubmission);
     toast.success('Quiz submitted and auto-graded successfully!');
@@ -282,29 +306,20 @@ export const StudentQuizzesPage: React.FC = () => {
 
                 <div className="shrink-0 flex flex-col sm:flex-row gap-2">
                   {isCompleted ? (
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Link
                         to="/results"
-                        className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 transition-colors shadow-2xs"
+                        className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-xs font-semibold text-emerald-800 transition-colors shadow-2xs"
                       >
-                        Review Result ({pastSub.percent}%)
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        View Result ({pastSub.percent}%)
                       </Link>
-                      {avail.isAvailableForStudent ? (
-                        <button
-                          type="button"
-                          onClick={() => handleStartQuiz(quiz)}
-                          className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg bg-[#0F2A4A] hover:bg-[#163c68] text-white text-xs font-semibold transition-colors shadow-2xs cursor-pointer"
-                        >
-                          Retake Quiz
-                        </button>
-                      ) : (
-                        <span
-                          className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg bg-slate-100 text-slate-400 text-xs font-semibold border border-slate-200 cursor-not-allowed"
-                          title="Assessment is currently outside its active schedule window."
-                        >
-                          <Lock className="w-3.5 h-3.5" /> Retake Locked
-                        </span>
-                      )}
+                      <span
+                        className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-xs font-medium border border-slate-200 dark:border-slate-700 cursor-not-allowed select-none"
+                        title="Assessment already submitted. Retakes are strictly prohibited."
+                      >
+                        <Lock className="w-3.5 h-3.5 text-slate-400" /> Submitted • No Retakes
+                      </span>
                     </div>
                   ) : avail.isAvailableForStudent ? (
                     <button
@@ -340,65 +355,52 @@ export const StudentQuizzesPage: React.FC = () => {
       {activeQuiz && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
           <div className="bg-white rounded-2xl max-w-3xl w-full p-6 sm:p-8 shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto animate-in fade-in zoom-in-95">
-            {submittedResult ? (
-              /* INSTANT POST-SUBMISSION RESULTS SUMMARY */
+            {activeQuiz && getStudentSubmission(activeQuiz.id) && !submittedResult ? (
+              /* ALREADY SUBMITTED SHIELD */
+              <div className="text-center py-8 px-4 space-y-4">
+                <div className="w-14 h-14 rounded-full bg-rose-100 dark:bg-rose-950/40 text-rose-600 flex items-center justify-center mx-auto mb-2">
+                  <Lock className="w-7 h-7" />
+                </div>
+                <h3 className="text-xl font-serif font-bold text-[#0F2A4A] dark:text-slate-100">
+                  Assessment Already Submitted
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
+                  You have already completed and submitted <strong>"{activeQuiz.title}"</strong>. School assessment policy strictly enforces a single attempt per student, and retakes are not permitted.
+                </p>
+                <div className="flex justify-center items-center gap-3 pt-3">
+                  <Link
+                    to="/results"
+                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition-colors shadow-2xs"
+                  >
+                    <CheckCircle2 className="w-4 h-4" /> View Your Grade & Answers
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => setActiveQuiz(null)}
+                    className="px-4 py-2.5 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
+                  >
+                    Return to Quizzes
+                  </button>
+                </div>
+              </div>
+            ) : submittedResult ? (
+              /* INSTANT POST-SUBMISSION RESULTS SUMMARY WITH CELEBRATORY ANIMATIONS */
               <div className="space-y-6">
-                <div className="text-center pb-4 border-b border-slate-100">
-                  <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-3">
-                    <Award className="w-7 h-7" />
-                  </div>
-                  <h3 className="text-2xl font-serif font-bold text-[#0F2A4A]">Assessment Submitted!</h3>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Your answers were automatically evaluated by the EduForm grading engine.
-                  </p>
-                </div>
-
-                <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col sm:flex-row items-center justify-around gap-4 text-center">
-                  <div>
-                    <span className="text-3xl font-extrabold text-[#0F2A4A] block">
-                      {submittedResult.totalScore} / {submittedResult.totalPossible}
-                    </span>
-                    <span className="text-xs font-semibold text-slate-500">Marks Scored</span>
-                  </div>
-
-                  <div>
-                    <span className="text-3xl font-extrabold text-emerald-600 block">
-                      {submittedResult.percent}%
-                    </span>
-                    <span className="text-xs font-semibold text-slate-500">
-                      {submittedResult.percent >= (activeQuiz.settings.passMarkPercent || 50)
-                        ? 'Passed'
-                        : 'Below Pass Mark'}
-                    </span>
-                  </div>
-
-                  <div>
-                    <span className="text-xs font-bold uppercase tracking-wider block text-slate-700">
-                      Grading Status
-                    </span>
-                    <span
-                      className={`inline-flex items-center gap-1 mt-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                        submittedResult.status === 'pending_manual'
-                          ? 'bg-amber-100 text-amber-800'
-                          : 'bg-emerald-100 text-emerald-800'
-                      }`}
-                    >
-                      {submittedResult.status === 'pending_manual' ? 'Pending Theory Marks' : 'Fully Graded'}
-                    </span>
-                  </div>
-                </div>
-
-                {submittedResult.status === 'pending_manual' && (
-                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2.5">
-                    <Clock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                    <span>
-                      <strong>Theory Questions Queued:</strong> Objective questions have been auto-graded immediately ({submittedResult.autoScore}/{submittedResult.autoTotal} marks). Your theory answers have been sent to the instructor, and your final mark may increase.
-                    </span>
-                  </div>
-                )}
+                <QuizSubmissionCelebration
+                  submission={submittedResult}
+                  quiz={activeQuiz}
+                  onDone={() => {
+                    setActiveQuiz(null);
+                    setSubmittedResult(null);
+                  }}
+                  onViewAnalytics={() => navigate('/results')}
+                  onScrollToReview={() => {
+                    reviewSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                />
 
                 {/* Instant Answer Breakdown with Explanations */}
-                <div className="space-y-4">
+                <div ref={reviewSectionRef} className="space-y-4 pt-2">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">
                     Your Answer Review:
                   </h4>
@@ -472,17 +474,29 @@ export const StudentQuizzesPage: React.FC = () => {
                   })}
                 </div>
 
-                <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveQuiz(null);
-                      setSubmittedResult(null);
-                    }}
-                    className="px-5 py-2.5 rounded-lg text-xs font-semibold bg-[#0F2A4A] text-white hover:bg-[#163c68]"
-                  >
-                    Done & Return to Quizzes
-                  </button>
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-slate-100">
+                  <span className="text-[11px] text-slate-500 flex items-center gap-1 font-medium">
+                    <Lock className="w-3.5 h-3.5 text-slate-400" />
+                    Single attempt recorded. Retakes are locked.
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Link
+                      to="/results"
+                      className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-2xs transition-colors"
+                    >
+                      <CheckCircle2 className="w-4 h-4" /> View Full Analytics
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveQuiz(null);
+                        setSubmittedResult(null);
+                      }}
+                      className="px-5 py-2.5 rounded-lg text-xs font-semibold bg-[#0F2A4A] text-white hover:bg-[#163c68] transition-colors cursor-pointer"
+                    >
+                      Done & Return to Quizzes
+                    </button>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -498,10 +512,18 @@ export const StudentQuizzesPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setActiveQuiz(null)}
-                    className="text-slate-400 hover:text-slate-600"
+                    className="text-slate-400 hover:text-slate-600 cursor-pointer"
                   >
                     <X className="w-5 h-5" />
                   </button>
+                </div>
+
+                {/* Single Attempt Policy Banner */}
+                <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl text-xs text-amber-900 dark:text-amber-200 flex items-center gap-2.5">
+                  <ShieldAlert className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span>
+                    <strong>Single Attempt Policy:</strong> Once you submit this test, your submission is final. Retakes are strictly prohibited.
+                  </span>
                 </div>
 
                 {/* Questions Grouped by Section */}

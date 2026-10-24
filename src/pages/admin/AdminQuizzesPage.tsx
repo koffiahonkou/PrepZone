@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   FileQuestion,
   Clock,
@@ -162,7 +163,28 @@ export const AdminQuizzesPage: React.FC = () => {
     batchLabel: 'Batch 2026/2027',
   });
   const [reactivationModalQuiz, setReactivationModalQuiz] = useState<Quiz | null>(null);
-  const [quizStatusFilter, setQuizStatusFilter] = useState<'all' | 'active' | 'scheduled' | 'expired' | 'closed'>('all');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialFilter = searchParams.get('filter');
+  const [quizStatusFilter, setQuizStatusFilter] = useState<'all' | 'active' | 'scheduled' | 'expired' | 'closed' | 'old_reactivation'>(() => {
+    if (initialFilter === 'old_reactivation' || initialFilter === 'expired' || initialFilter === 'active' || initialFilter === 'scheduled' || initialFilter === 'closed') {
+      return initialFilter;
+    }
+    return 'all';
+  });
+
+  const isQuizOldForReactivation = (q: Quiz) => {
+    const avail = getQuizAvailability(q);
+    return (
+      avail.state === 'expired' ||
+      avail.state === 'closed' ||
+      q.status === 'closed' ||
+      q.isActive === false ||
+      (q.endDate && new Date(q.endDate).getTime() < Date.now()) ||
+      avail.isDisappeared
+    );
+  };
+
+  const oldQuizzesCount = quizzes.filter(isQuizOldForReactivation).length;
 
   const [activeSectionFilter, setActiveSectionFilter] = useState<'all' | SectionKey>('all');
   const [batchCountInputs, setBatchCountInputs] = useState<Record<SectionKey, number>>({
@@ -758,6 +780,12 @@ export const AdminQuizzesPage: React.FC = () => {
             color: 'text-blue-700 bg-blue-50 border-blue-200',
           },
           {
+            key: 'old_reactivation',
+            label: 'Old Quizzes (For Reactivation)',
+            count: oldQuizzesCount,
+            isSpecial: true,
+          },
+          {
             key: 'expired',
             label: 'Expired / Disappeared',
             count: quizzes.filter((q) => getQuizAvailability(q).state === 'expired').length,
@@ -775,17 +803,27 @@ export const AdminQuizzesPage: React.FC = () => {
             <button
               key={tab.key}
               type="button"
-              onClick={() => setQuizStatusFilter(tab.key as any)}
+              onClick={() => {
+                setQuizStatusFilter(tab.key as any);
+                setSearchParams(tab.key === 'all' ? {} : { filter: tab.key });
+              }}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all flex items-center gap-2 cursor-pointer ${
                 isActive
                   ? 'bg-[#0F2A4A] text-white border-[#0F2A4A] shadow-xs'
+                  : tab.isSpecial
+                  ? 'bg-indigo-50/70 text-indigo-800 border-indigo-200 hover:bg-indigo-100'
                   : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
               }`}
             >
+              {tab.isSpecial && <RotateCcw className="w-3.5 h-3.5 text-indigo-600" />}
               <span>{tab.label}</span>
               <span
                 className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-                  isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
+                  isActive
+                    ? 'bg-white/20 text-white'
+                    : tab.isSpecial
+                    ? 'bg-indigo-200 text-indigo-900'
+                    : 'bg-slate-100 text-slate-700'
                 }`}
               >
                 {tab.count}
@@ -795,11 +833,32 @@ export const AdminQuizzesPage: React.FC = () => {
         })}
       </div>
 
+      {/* Old Quizzes Reactivation Guidance Banner */}
+      {quizStatusFilter === 'old_reactivation' && (
+        <div className="p-4 bg-indigo-50/80 border border-indigo-200 rounded-xl text-xs text-indigo-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+          <div className="flex items-start gap-2.5">
+            <RotateCcw className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold text-sm text-indigo-950">
+                Old Quizzes Reactivation Center ({oldQuizzesCount} past/closed assessments)
+              </p>
+              <p className="text-xs text-indigo-800 mt-0.5">
+                These tests are from past academic cohorts, expired schedules, or deactivated states. Click <strong>"Reactivate Assessment"</strong> to assign them to a new class stream, set fresh start/end dates, and make them live again for current students.
+              </p>
+            </div>
+          </div>
+          <span className="shrink-0 text-[11px] font-semibold text-indigo-800 bg-white px-3 py-1.5 rounded-lg border border-indigo-200 shadow-2xs">
+            Filtering Old Quizzes
+          </span>
+        </div>
+      )}
+
       {/* Quizzes List */}
       <div className="space-y-4">
         {quizzes
           .filter((quiz) => {
             if (quizStatusFilter === 'all') return true;
+            if (quizStatusFilter === 'old_reactivation') return isQuizOldForReactivation(quiz);
             const avail = getQuizAvailability(quiz);
             if (quizStatusFilter === 'active') return avail.state === 'active';
             if (quizStatusFilter === 'scheduled') return avail.state === 'scheduled';
@@ -1001,11 +1060,15 @@ export const AdminQuizzesPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => setReactivationModalQuiz(quiz)}
-                      className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-all cursor-pointer shadow-2xs"
-                      title="Reactivate for same badge or promote to new badge with fresh dates"
+                      className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer shadow-2xs ${
+                        isQuizOldForReactivation(quiz)
+                          ? 'bg-indigo-600 hover:bg-indigo-700 text-white border border-indigo-600 font-bold ring-2 ring-indigo-400/30'
+                          : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
+                      }`}
+                      title="Reactivate for same batch or promote to new cohort batch with fresh dates"
                     >
-                      <RotateCcw className="w-3.5 h-3.5 text-indigo-600" />
-                      Reactivate / Promote
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      Reactivate Assessment
                     </button>
                   </div>
 
@@ -1052,6 +1115,31 @@ export const AdminQuizzesPage: React.FC = () => {
               </div>
             );
           })}
+
+        {quizzes.filter((quiz) => {
+          if (quizStatusFilter === 'all') return true;
+          if (quizStatusFilter === 'old_reactivation') return isQuizOldForReactivation(quiz);
+          const avail = getQuizAvailability(quiz);
+          if (quizStatusFilter === 'active') return avail.state === 'active';
+          if (quizStatusFilter === 'scheduled') return avail.state === 'scheduled';
+          if (quizStatusFilter === 'expired') return avail.state === 'expired';
+          if (quizStatusFilter === 'closed') return avail.state === 'closed';
+          return true;
+        }).length === 0 && (
+          <div className="bg-white p-8 rounded-xl border border-dashed border-slate-300 text-center text-slate-500">
+            <RotateCcw className="w-10 h-10 text-slate-400 mx-auto mb-2 opacity-50" />
+            <h3 className="text-sm font-bold text-slate-700">
+              {quizStatusFilter === 'old_reactivation'
+                ? 'No Old Quizzes Found for Reactivation'
+                : 'No Quizzes Found in This Filter'}
+            </h3>
+            <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+              {quizStatusFilter === 'old_reactivation'
+                ? 'All existing assessments are currently active or scheduled. When tests expire or close, they appear here ready for one-click reactivation.'
+                : 'Try switching to another filter tab above or create a new assessment.'}
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Add / Edit Quiz Modal with Detailed Radio Button Question Builder */}
