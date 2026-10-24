@@ -33,6 +33,7 @@ const STORAGE_KEYS = {
   QUIZZES: 'eduform_store_quizzes',
   SUBMISSIONS: 'eduform_store_submissions',
   NOTIFICATIONS: 'eduform_store_notifications',
+  NOTIFICATION_READS: 'eduform_store_notification_reads',
   AUDIT_LOGS: 'eduform_store_audit_logs',
   SETTINGS: 'eduform_store_settings',
 };
@@ -425,6 +426,56 @@ class DataStore {
   public deleteNotification(id: string): void {
     const notifs = this.getNotifications().filter((n) => n.id !== id);
     saveStore(STORAGE_KEYS.NOTIFICATIONS, notifs);
+  }
+
+  // --- Notification Read Tracking ---
+  public getNotificationReads(userId?: string): string[] {
+    if (!userId) return [];
+    const allReads = getStoredOrInit<Record<string, string[]>>(
+      STORAGE_KEYS.NOTIFICATION_READS,
+      {}
+    );
+    return allReads[userId] || [];
+  }
+
+  public markNotificationAsRead(notificationId: string, userId?: string): void {
+    if (!userId || !notificationId) return;
+    const allReads = getStoredOrInit<Record<string, string[]>>(
+      STORAGE_KEYS.NOTIFICATION_READS,
+      {}
+    );
+    const userReads = new Set(allReads[userId] || []);
+    userReads.add(notificationId);
+    allReads[userId] = Array.from(userReads);
+    saveStore(STORAGE_KEYS.NOTIFICATION_READS, allReads);
+    window.dispatchEvent(
+      new CustomEvent('prepzone_notifications_read', {
+        detail: { userId, notificationId },
+      })
+    );
+  }
+
+  public markAllNotificationsAsRead(notificationIds: string[], userId?: string): void {
+    if (!userId || !notificationIds.length) return;
+    const allReads = getStoredOrInit<Record<string, string[]>>(
+      STORAGE_KEYS.NOTIFICATION_READS,
+      {}
+    );
+    const userReads = new Set(allReads[userId] || []);
+    notificationIds.forEach((id) => userReads.add(id));
+    allReads[userId] = Array.from(userReads);
+    saveStore(STORAGE_KEYS.NOTIFICATION_READS, allReads);
+    window.dispatchEvent(
+      new CustomEvent('prepzone_notifications_read', {
+        detail: { userId },
+      })
+    );
+  }
+
+  public isNotificationRead(notificationId: string, userId?: string): boolean {
+    if (!userId) return true;
+    const reads = this.getNotificationReads(userId);
+    return reads.includes(notificationId);
   }
 
   // --- Audit Logs ---

@@ -149,9 +149,26 @@
     -webkit-font-smoothing: antialiased;
   }
 
+  /* Light mode high-contrast text elevation (WCAG AA compliant) */
+  .text-slate-400 {
+    color: #64748b;
+  }
+  .text-slate-500 {
+    color: #475569;
+  }
+  .text-slate-600 {
+    color: #334155;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: #64748b;
+    opacity: 1;
+  }
+
   [contenteditable][data-placeholder]:empty:before {
     content: attr(data-placeholder);
-    color: #94a3b8;
+    color: #64748b;
     pointer-events: none;
     display: block;
   }
@@ -401,6 +418,7 @@ body::-webkit-scrollbar-thumb:hover {
 
 /* ========================================================
    Day and Night Mode (Light / Dark Theme Support)
+   High-contrast WCAG AA Accessible Rules for Day & Night
    ======================================================== */
 html.dark,
 html[data-mode="night"] {
@@ -428,21 +446,31 @@ html[data-mode="night"] .bg-slate-50\/30,
 html.dark .bg-slate-50\/50,
 html[data-mode="night"] .bg-slate-50\/50,
 html.dark .bg-slate-50\/60,
-html[data-mode="night"] .bg-slate-50\/60 {
+html[data-mode="night"] .bg-slate-50\/60,
+html.dark .bg-slate-50\/80,
+html[data-mode="night"] .bg-slate-50\/80 {
   background-color: #162032 !important;
 }
 
 html.dark .bg-slate-100,
 html[data-mode="night"] .bg-slate-100 {
-  background-color: #334155 !important;
+  background-color: #273549 !important;
   color: #f1f5f9 !important;
 }
 
+html.dark .bg-slate-200,
+html[data-mode="night"] .bg-slate-200 {
+  background-color: #334155 !important;
+  color: #f8fafc !important;
+}
+
 /* Borders */
+html.dark .border-slate-100,
+html[data-mode="night"] .border-slate-100,
 html.dark .border-slate-200,
 html[data-mode="night"] .border-slate-200,
-html.dark .border-slate-100,
-html[data-mode="night"] .border-slate-100 {
+html.dark .border-slate-200\/80,
+html[data-mode="night"] .border-slate-200\/80 {
   border-color: #334155 !important;
 }
 
@@ -451,43 +479,104 @@ html[data-mode="night"] .border-slate-300 {
   border-color: #475569 !important;
 }
 
-/* Text Adaptations */
+/* Dark Mode Typography - Accessible Hierarchy */
 html.dark .text-slate-900,
 html[data-mode="night"] .text-slate-900 {
-  color: #f8fafc !important;
+  color: #ffffff !important;
 }
 
 html.dark .text-slate-800,
 html[data-mode="night"] .text-slate-800 {
-  color: #f1f5f9 !important;
+  color: #f8fafc !important;
 }
 
 html.dark .text-slate-700,
 html[data-mode="night"] .text-slate-700 {
-  color: #e2e8f0 !important;
+  color: #f1f5f9 !important;
 }
 
 html.dark .text-slate-600,
 html[data-mode="night"] .text-slate-600 {
-  color: #cbd5e1 !important;
+  color: #e2e8f0 !important;
 }
 
 html.dark .text-slate-500,
 html[data-mode="night"] .text-slate-500 {
-  color: #94a3b8 !important;
+  color: #cbd5e1 !important;
 }
 
 html.dark .text-slate-400,
 html[data-mode="night"] .text-slate-400 {
-  color: #64748b !important;
+  color: #cbd5e1 !important; /* High contrast: 7.3:1 ratio on slate-800 */
 }
 
+html.dark .text-slate-300,
+html[data-mode="night"] .text-slate-300 {
+  color: #e2e8f0 !important;
+}
+
+/* Academic Brand Navy Heading in Dark Mode */
 html.dark .text-\[\#0F2A4A\],
-html[data-mode="night"] .text-\[\#0F2A4A\] {
+html[data-mode="night"] .text-\[\#0F2A4A\],
+html.dark[data-theme] .text-\[\#0F2A4A\],
+html[data-mode="night"][data-theme] .text-\[\#0F2A4A\] {
   color: #f8fafc !important;
 }
 
-/* Form Inputs & Controls */
+/* Rich Text Elements in Dark Mode */
+html.dark .rich-text-content h1,
+html[data-mode="night"] .rich-text-content h1,
+html.dark .rich-editor-canvas h1,
+html[data-mode="night"] .rich-editor-canvas h1,
+html.dark .rich-text-content h2,
+html[data-mode="night"] .rich-text-content h2,
+html.dark .rich-editor-canvas h2,
+html[data-mode="night"] .rich-editor-canvas h2,
+html.dark .rich-text-content h3,
+html[data-mode="night"] .rich-text-content h3,
+html.dark .rich-editor-canvas h3,
+html[data-mode="night"] .rich-editor-canvas h3 {
+  color: #f8fafc !important;
+}
+
+html.dark .rich-text-content p,
+html[data-mode="night"] .rich-text-content p,
+html.dark .rich-editor-canvas p,
+html[data-mode="night"] .rich-editor-canvas p,
+html.dark .rich-text-content li,
+html[data-mode="night"] .rich-text-content li,
+html.dark .rich-editor-canvas li,
+html[data-mode="night"] .rich-editor-canvas li {
+  color: #e2e8f0 !important;
+}
+
+html.dark .rich-text-content blockquote,
+html[data-mode="night"] .rich-text-content blockquote,
+html.dark .rich-editor-canvas blockquote,
+html[data-mode="night"] .rich-editor-canvas blockquote,
+html.dark [contenteditable].rich-editor-canvas blockquote,
+html[data-mode="night"] [contenteditable].rich-editor-canvas blockquote {
+  background-color: rgba(6, 78, 59, 0.35) !important;
+  border-left-color: #10b981 !important;
+  color: #a7f3d0 !important;
+}
+
+html.dark .rich-text-content blockquote p,
+html[data-mode="night"] .rich-text-content blockquote p,
+html.dark .rich-editor-canvas blockquote p,
+html[data-mode="night"] .rich-editor-canvas blockquote p {
+  color: #a7f3d0 !important;
+}
+
+html.dark .rich-text-content mark,
+html[data-mode="night"] .rich-text-content mark,
+html.dark .rich-editor-canvas mark,
+html[data-mode="night"] .rich-editor-canvas mark {
+  background-color: rgba(234, 179, 8, 0.3) !important;
+  color: #fef08a !important;
+}
+
+/* Form Inputs & Controls in Dark Mode */
 html.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
 html.dark textarea,
 html.dark select,
@@ -502,8 +591,171 @@ html[data-mode="night"] select {
 html.dark input::placeholder,
 html[data-mode="night"] input::placeholder,
 html.dark textarea::placeholder,
-html[data-mode="night"] textarea::placeholder {
-  color: #64748b !important;
+html[data-mode="night"] textarea::placeholder,
+html.dark [contenteditable][data-placeholder]:empty:before,
+html[data-mode="night"] [contenteditable][data-placeholder]:empty:before {
+  color: #94a3b8 !important;
+  opacity: 1 !important;
+}
+
+/* Badge and Alert Adaptations in Dark Mode */
+/* Emerald / Success */
+html.dark .bg-emerald-50,
+html[data-mode="night"] .bg-emerald-50,
+html.dark .bg-emerald-100,
+html[data-mode="night"] .bg-emerald-100,
+html.dark .bg-emerald-50\/60,
+html[data-mode="night"] .bg-emerald-50\/60,
+html.dark .bg-emerald-50\/20,
+html[data-mode="night"] .bg-emerald-50\/20 {
+  background-color: rgba(6, 78, 59, 0.35) !important;
+}
+
+html.dark .text-emerald-700,
+html[data-mode="night"] .text-emerald-700,
+html.dark .text-emerald-800,
+html[data-mode="night"] .text-emerald-800,
+html.dark .text-emerald-900,
+html[data-mode="night"] .text-emerald-900,
+html.dark .text-emerald-950,
+html[data-mode="night"] .text-emerald-950,
+html.dark[data-theme] .text-emerald-800,
+html[data-mode="night"][data-theme] .text-emerald-800,
+html.dark[data-theme] .text-emerald-900,
+html[data-mode="night"][data-theme] .text-emerald-900 {
+  color: #6ee7b7 !important;
+}
+
+html.dark .border-emerald-100,
+html[data-mode="night"] .border-emerald-100,
+html.dark .border-emerald-200,
+html[data-mode="night"] .border-emerald-200,
+html.dark .border-emerald-300,
+html[data-mode="night"] .border-emerald-300 {
+  border-color: rgba(16, 185, 129, 0.35) !important;
+}
+
+/* Blue / Info */
+html.dark .bg-blue-50,
+html[data-mode="night"] .bg-blue-50,
+html.dark .bg-blue-100,
+html[data-mode="night"] .bg-blue-100,
+html.dark .bg-blue-50\/40,
+html[data-mode="night"] .bg-blue-50\/40,
+html.dark .bg-blue-50\/60,
+html[data-mode="night"] .bg-blue-50\/60 {
+  background-color: rgba(30, 58, 138, 0.35) !important;
+}
+
+html.dark .text-blue-700,
+html[data-mode="night"] .text-blue-700,
+html.dark .text-blue-800,
+html[data-mode="night"] .text-blue-800,
+html.dark .text-blue-900,
+html[data-mode="night"] .text-blue-900 {
+  color: #93c5fd !important;
+}
+
+html.dark .border-blue-100,
+html[data-mode="night"] .border-blue-100,
+html.dark .border-blue-200,
+html[data-mode="night"] .border-blue-200 {
+  border-color: rgba(59, 130, 246, 0.35) !important;
+}
+
+/* Amber / Warning */
+html.dark .bg-amber-50,
+html[data-mode="night"] .bg-amber-50,
+html.dark .bg-amber-100,
+html[data-mode="night"] .bg-amber-100,
+html.dark .bg-amber-50\/20,
+html[data-mode="night"] .bg-amber-50\/20,
+html.dark .bg-amber-50\/40,
+html[data-mode="night"] .bg-amber-50\/40 {
+  background-color: rgba(120, 53, 15, 0.35) !important;
+}
+
+html.dark .text-amber-700,
+html[data-mode="night"] .text-amber-700,
+html.dark .text-amber-800,
+html[data-mode="night"] .text-amber-800,
+html.dark .text-amber-900,
+html[data-mode="night"] .text-amber-900 {
+  color: #fde68a !important;
+}
+
+html.dark .border-amber-100,
+html[data-mode="night"] .border-amber-100,
+html.dark .border-amber-200,
+html[data-mode="night"] .border-amber-200 {
+  border-color: rgba(245, 158, 11, 0.35) !important;
+}
+
+/* Rose / Danger */
+html.dark .bg-rose-50,
+html[data-mode="night"] .bg-rose-50,
+html.dark .bg-rose-100,
+html[data-mode="night"] .bg-rose-100,
+html.dark .bg-rose-50\/40,
+html[data-mode="night"] .bg-rose-50\/40 {
+  background-color: rgba(136, 19, 55, 0.35) !important;
+}
+
+html.dark .text-rose-700,
+html[data-mode="night"] .text-rose-700,
+html.dark .text-rose-800,
+html[data-mode="night"] .text-rose-800,
+html.dark .text-rose-900,
+html[data-mode="night"] .text-rose-900 {
+  color: #fca5a5 !important;
+}
+
+html.dark .border-rose-100,
+html[data-mode="night"] .border-rose-100,
+html.dark .border-rose-200,
+html[data-mode="night"] .border-rose-200 {
+  border-color: rgba(244, 63, 94, 0.35) !important;
+}
+
+/* Purple / Violet */
+html.dark .bg-purple-50,
+html[data-mode="night"] .bg-purple-50,
+html.dark .bg-purple-100,
+html[data-mode="night"] .bg-purple-100,
+html.dark .bg-indigo-50,
+html[data-mode="night"] .bg-indigo-50,
+html.dark .bg-indigo-100,
+html[data-mode="night"] .bg-indigo-100 {
+  background-color: rgba(88, 28, 135, 0.35) !important;
+}
+
+html.dark .text-purple-700,
+html[data-mode="night"] .text-purple-700,
+html.dark .text-purple-800,
+html[data-mode="night"] .text-purple-800,
+html.dark .text-indigo-700,
+html[data-mode="night"] .text-indigo-700,
+html.dark .text-indigo-800,
+html[data-mode="night"] .text-indigo-800 {
+  color: #d8b4fe !important;
+}
+
+/* Table styling in Dark Mode */
+html.dark table thead th,
+html[data-mode="night"] table thead th {
+  background-color: #162032 !important;
+  color: #cbd5e1 !important;
+  border-color: #334155 !important;
+}
+
+html.dark table tbody td,
+html[data-mode="night"] table tbody td {
+  border-color: #334155 !important;
+}
+
+html.dark table tbody tr:hover,
+html[data-mode="night"] table tbody tr:hover {
+  background-color: #243044 !important;
 }
 
 /* Interactive States */

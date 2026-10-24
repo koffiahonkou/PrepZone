@@ -19,11 +19,22 @@ import {
   ShieldCheck,
   AlertCircle,
   ListChecks,
+  RotateCcw,
+  Power,
+  Calendar,
+  Eye,
+  EyeOff,
+  Tag,
+  GraduationCap,
 } from 'lucide-react';
 import { dataStore } from '@/src/services/dataStore';
 import { Quiz, QuizQuestion, QuestionType, QuestionOption } from '@/src/types';
 import { RichTextEditor } from '@/src/components/common/RichTextEditor';
 import { validateQuiz, QuizValidationResult, QuizValidationError } from '@/src/services/quizValidator';
+import { QuizScheduleManager, QuizScheduleValues } from '@/src/components/quizzes/QuizScheduleManager';
+import { QuizReactivationModal } from '@/src/components/quizzes/QuizReactivationModal';
+import { QuizStudentPreviewModal } from '@/src/components/quizzes/QuizStudentPreviewModal';
+import { getQuizAvailability, formatQuizDateTime } from '@/src/utils/quizAvailability';
 import { toast } from 'sonner';
 
 export type SectionKey = 'multiple_choice' | 'true_false' | 'short_text' | 'theory';
@@ -137,10 +148,21 @@ export const AdminQuizzesPage: React.FC = () => {
   const [formClassIds, setFormClassIds] = useState<string[]>([]);
   const [formTimeLimit, setFormTimeLimit] = useState(20);
   const [formPassMark, setFormPassMark] = useState(50);
-  const [formStatus, setFormStatus] = useState<'draft' | 'published' | 'closed'>('published');
+  const [formStatus, setFormStatus] = useState<'draft' | 'published' | 'closed' | 'scheduled'>('published');
   const [formQuestions, setFormQuestions] = useState<QuizQuestion[]>([]);
   const [validationResult, setValidationResult] = useState<QuizValidationResult | null>(null);
   const [showValidationModal, setShowValidationModal] = useState<boolean>(false);
+
+  // Scheduling and Reactivation State
+  const [formSchedule, setFormSchedule] = useState<QuizScheduleValues>({
+    startDate: '',
+    endDate: '',
+    autoDisappearOnExpiry: true,
+    visibilityMode: 'show_with_countdown',
+    batchLabel: 'Batch 2026/2027',
+  });
+  const [reactivationModalQuiz, setReactivationModalQuiz] = useState<Quiz | null>(null);
+  const [quizStatusFilter, setQuizStatusFilter] = useState<'all' | 'active' | 'scheduled' | 'expired' | 'closed'>('all');
 
   const [activeSectionFilter, setActiveSectionFilter] = useState<'all' | SectionKey>('all');
   const [batchCountInputs, setBatchCountInputs] = useState<Record<SectionKey, number>>({
@@ -159,9 +181,47 @@ export const AdminQuizzesPage: React.FC = () => {
   // Delete State
   const [deleteTarget, setDeleteTarget] = useState<Quiz | null>(null);
 
+  // Preview Mode State
+  const [previewQuiz, setPreviewQuiz] = useState<Quiz | null>(null);
+
   const getSubjectName = (subjId: string) => subjects.find((s) => s.id === subjId)?.name || subjId;
   const getClassName = (cid: string) => classes.find((c) => c.id === cid)?.name || cid;
   const getAttemptCount = (quizId: string) => submissions.filter((s) => s.quizId === quizId).length;
+
+  const handleOpenPreviewFromBuilder = () => {
+    const candidate: Quiz = {
+      id: editingQuiz ? editingQuiz.id : 'preview-quiz',
+      title: formTitle.trim() || 'Untitled Quiz Assessment',
+      description: formDescription.trim() || 'No instructions provided.',
+      subjectId: formSubjectId,
+      classIds: formClassIds,
+      levelIds: [],
+      status: formStatus,
+      startDate: formSchedule.startDate || null,
+      endDate: formSchedule.endDate || null,
+      batchLabel: formSchedule.batchLabel,
+      settings: {
+        timeLimitMins: formTimeLimit,
+        shuffleQuestions: false,
+        shuffleOptions: false,
+        maxAttempts: 2,
+        instantFeedback: true,
+        showCorrectAnswers: true,
+        passMarkPercent: formPassMark,
+        releaseResultsAt: null,
+        startDate: formSchedule.startDate || null,
+        endDate: formSchedule.endDate || null,
+        autoDisappearOnExpiry: formSchedule.autoDisappearOnExpiry,
+        visibilityMode: formSchedule.visibilityMode,
+        batchLabel: formSchedule.batchLabel,
+      },
+      questions: formQuestions,
+      totalMarks: formQuestions.reduce((acc, q) => acc + (q.marks || 0), 0),
+      createdBy: 'Instructor',
+      createdAt: new Date().toISOString(),
+    };
+    setPreviewQuiz(candidate);
+  };
 
   const openAddModal = () => {
     setEditingQuiz(null);
@@ -175,6 +235,15 @@ export const AdminQuizzesPage: React.FC = () => {
     setFormPassMark(50);
     setFormStatus('published');
     setActiveSectionFilter('all');
+    const nowIso = new Date().toISOString().slice(0, 16);
+    const inSevenDays = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().slice(0, 16);
+    setFormSchedule({
+      startDate: nowIso,
+      endDate: inSevenDays,
+      autoDisappearOnExpiry: true,
+      visibilityMode: 'show_with_countdown',
+      batchLabel: 'Batch 2026/2027',
+    });
     setFormQuestions([
       // Section A: Multiple Choice Questions (2 questions to demonstrate multiple)
       {
@@ -270,6 +339,13 @@ export const AdminQuizzesPage: React.FC = () => {
     setFormPassMark(quiz.settings.passMarkPercent);
     setFormStatus(quiz.status);
     setFormQuestions(quiz.questions || []);
+    setFormSchedule({
+      startDate: quiz.startDate || quiz.settings.startDate || '',
+      endDate: quiz.endDate || quiz.settings.endDate || '',
+      autoDisappearOnExpiry: quiz.settings.autoDisappearOnExpiry ?? true,
+      visibilityMode: quiz.settings.visibilityMode || 'show_with_countdown',
+      batchLabel: quiz.batchLabel || quiz.settings.batchLabel || 'Batch 2026/2027',
+    });
     setIsModalOpen(true);
   };
 
@@ -284,6 +360,37 @@ export const AdminQuizzesPage: React.FC = () => {
     dataStore.saveQuiz(duplicated);
     setQuizzes(dataStore.getQuizzes());
     toast.success(`Quiz duplicated as "${duplicated.title}".`);
+  };
+
+  const handleQuickToggleStatus = (targetQuiz: Quiz) => {
+    const isCurrentlyClosed = targetQuiz.status === 'closed' || targetQuiz.isActive === false;
+    const newStatus: 'published' | 'closed' = isCurrentlyClosed ? 'published' : 'closed';
+    const extendedDeadline = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().slice(0, 16);
+
+    const updated: Quiz = {
+      ...targetQuiz,
+      status: newStatus,
+      isActive: isCurrentlyClosed,
+      endDate:
+        isCurrentlyClosed && targetQuiz.endDate && new Date(targetQuiz.endDate).getTime() < Date.now()
+          ? extendedDeadline
+          : targetQuiz.endDate,
+      settings: {
+        ...targetQuiz.settings,
+        endDate:
+          isCurrentlyClosed && targetQuiz.settings.endDate && new Date(targetQuiz.settings.endDate).getTime() < Date.now()
+            ? extendedDeadline
+            : targetQuiz.settings.endDate,
+      },
+    };
+
+    dataStore.saveQuiz(updated);
+    setQuizzes(dataStore.getQuizzes());
+    toast.success(
+      isCurrentlyClosed
+        ? `Quiz "${targetQuiz.title}" activated for students.`
+        : `Quiz "${targetQuiz.title}" deactivated and hidden from student dashboard.`
+    );
   };
 
   const handleValidateQuiz = () => {
@@ -340,10 +447,19 @@ export const AdminQuizzesPage: React.FC = () => {
         subjectId: formSubjectId,
         classIds: formClassIds,
         status: formStatus,
+        startDate: formSchedule.startDate || null,
+        endDate: formSchedule.endDate || null,
+        batchLabel: formSchedule.batchLabel.trim(),
+        isActive: formStatus !== 'closed',
         settings: {
           ...editingQuiz.settings,
           timeLimitMins: formTimeLimit,
           passMarkPercent: formPassMark,
+          startDate: formSchedule.startDate || null,
+          endDate: formSchedule.endDate || null,
+          autoDisappearOnExpiry: formSchedule.autoDisappearOnExpiry,
+          visibilityMode: formSchedule.visibilityMode,
+          batchLabel: formSchedule.batchLabel.trim(),
         },
         questions: formQuestions,
         totalMarks,
@@ -359,6 +475,10 @@ export const AdminQuizzesPage: React.FC = () => {
         classIds: formClassIds,
         levelIds: [],
         status: formStatus,
+        startDate: formSchedule.startDate || null,
+        endDate: formSchedule.endDate || null,
+        batchLabel: formSchedule.batchLabel.trim(),
+        isActive: formStatus !== 'closed',
         settings: {
           timeLimitMins: formTimeLimit,
           shuffleQuestions: false,
@@ -368,6 +488,11 @@ export const AdminQuizzesPage: React.FC = () => {
           showCorrectAnswers: true,
           passMarkPercent: formPassMark,
           releaseResultsAt: null,
+          startDate: formSchedule.startDate || null,
+          endDate: formSchedule.endDate || null,
+          autoDisappearOnExpiry: formSchedule.autoDisappearOnExpiry,
+          visibilityMode: formSchedule.visibilityMode,
+          batchLabel: formSchedule.batchLabel.trim(),
         },
         questions: formQuestions,
         totalMarks,
@@ -616,119 +741,317 @@ export const AdminQuizzesPage: React.FC = () => {
         </button>
       </div>
 
-      {/* Quizzes List */}
-      <div className="space-y-4">
-        {quizzes.map((quiz) => {
-          const subjName = getSubjectName(quiz.subjectId);
-          const attempts = getAttemptCount(quiz.id);
-          const theoryCount = quiz.questions?.filter((q) => q.type === 'theory').length || 0;
-          const objectiveCount = (quiz.questions?.length || 0) - theoryCount;
-
+      {/* Quizzes Status Filter Tabs */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 pb-3">
+        {[
+          { key: 'all', label: 'All Quizzes', count: quizzes.length },
+          {
+            key: 'active',
+            label: 'Active Now',
+            count: quizzes.filter((q) => getQuizAvailability(q).state === 'active').length,
+            color: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+          },
+          {
+            key: 'scheduled',
+            label: 'Scheduled',
+            count: quizzes.filter((q) => getQuizAvailability(q).state === 'scheduled').length,
+            color: 'text-blue-700 bg-blue-50 border-blue-200',
+          },
+          {
+            key: 'expired',
+            label: 'Expired / Disappeared',
+            count: quizzes.filter((q) => getQuizAvailability(q).state === 'expired').length,
+            color: 'text-amber-700 bg-amber-50 border-amber-200',
+          },
+          {
+            key: 'closed',
+            label: 'Deactivated',
+            count: quizzes.filter((q) => getQuizAvailability(q).state === 'closed').length,
+            color: 'text-slate-700 bg-slate-100 border-slate-200',
+          },
+        ].map((tab) => {
+          const isActive = quizStatusFilter === tab.key;
           return (
-            <div
-              key={quiz.id}
-              className="bg-white p-6 rounded-xl border border-slate-200 shadow-2xs hover:shadow-xs transition-shadow flex flex-col md:flex-row md:items-start justify-between gap-6"
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setQuizStatusFilter(tab.key as any)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all flex items-center gap-2 cursor-pointer ${
+                isActive
+                  ? 'bg-[#0F2A4A] text-white border-[#0F2A4A] shadow-xs'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+              }`}
             >
-              <div className="flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="px-2.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-100">
-                    {subjName}
-                  </span>
-                  <span
-                    className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                      quiz.status === 'published'
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : quiz.status === 'draft'
-                        ? 'bg-amber-100 text-amber-800'
-                        : 'bg-slate-100 text-slate-700'
-                    }`}
-                  >
-                    {quiz.status.toUpperCase()}
-                  </span>
-                  {theoryCount > 0 ? (
-                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
-                      Hybrid ({theoryCount} Theory Queued)
-                    </span>
-                  ) : (
-                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
-                      100% Instant Auto-Graded
-                    </span>
-                  )}
-                </div>
-
-                <h3 className="text-lg font-bold text-[#0F2A4A] mt-2">{quiz.title}</h3>
-                <p className="text-xs text-slate-600 mt-1">{quiz.description}</p>
-
-                <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-slate-50 p-3 rounded-lg border border-slate-100">
-                  <div>
-                    <span className="text-[10px] text-slate-400 block uppercase">Total Questions</span>
-                    <span className="font-bold text-slate-800">
-                      {quiz.questions?.length || 0} ({objectiveCount} obj + {theoryCount} theory)
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-slate-400 block uppercase">Max Marks</span>
-                    <span className="font-bold text-emerald-600">{quiz.totalMarks} Marks</span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-slate-400 block uppercase">Time Limit</span>
-                    <span className="font-bold text-slate-800">
-                      {quiz.settings.timeLimitMins > 0 ? `${quiz.settings.timeLimitMins} mins` : 'Untimed'}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-slate-400 block uppercase">Submissions</span>
-                    <span className="font-bold text-blue-600">{attempts} Attempts</span>
-                  </div>
-                </div>
-
-                <div className="mt-3 flex flex-wrap gap-1.5 items-center">
-                  <span className="text-[11px] font-semibold text-slate-500">Assigned Classes:</span>
-                  {quiz.classIds?.map((cid) => (
-                    <span
-                      key={cid}
-                      className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700"
-                    >
-                      {getClassName(cid)}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="text-right shrink-0 flex flex-col items-end gap-2">
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => handleDuplicate(quiz)}
-                    className="p-1.5 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-                    title="Duplicate quiz"
-                  >
-                    <Copy className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openEditModal(quiz)}
-                    className="p-1.5 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-                    title="Edit quiz"
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDeleteTarget(quiz)}
-                    className="p-1.5 rounded text-rose-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
-                    title="Delete quiz"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-                <span className="text-xs text-slate-400">
-                  Pass mark: {quiz.settings.passMarkPercent}%
-                </span>
-              </div>
-            </div>
+              <span>{tab.label}</span>
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                  isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
+                }`}
+              >
+                {tab.count}
+              </span>
+            </button>
           );
         })}
+      </div>
+
+      {/* Quizzes List */}
+      <div className="space-y-4">
+        {quizzes
+          .filter((quiz) => {
+            if (quizStatusFilter === 'all') return true;
+            const avail = getQuizAvailability(quiz);
+            if (quizStatusFilter === 'active') return avail.state === 'active';
+            if (quizStatusFilter === 'scheduled') return avail.state === 'scheduled';
+            if (quizStatusFilter === 'expired') return avail.state === 'expired';
+            if (quizStatusFilter === 'closed') return avail.state === 'closed';
+            return true;
+          })
+          .map((quiz) => {
+            const subjName = getSubjectName(quiz.subjectId);
+            const attempts = getAttemptCount(quiz.id);
+            const theoryCount = quiz.questions?.filter((q) => q.type === 'theory').length || 0;
+            const objectiveCount = (quiz.questions?.length || 0) - theoryCount;
+            const avail = getQuizAvailability(quiz);
+            const isDeactivated = quiz.status === 'closed' || quiz.isActive === false;
+
+            return (
+              <div
+                key={quiz.id}
+                className={`bg-white p-6 rounded-xl border shadow-2xs hover:shadow-xs transition-shadow flex flex-col md:flex-row md:items-start justify-between gap-6 ${
+                  isDeactivated
+                    ? 'border-slate-300 bg-slate-50/40 opacity-90'
+                    : avail.state === 'active'
+                    ? 'border-emerald-200 ring-1 ring-emerald-500/10'
+                    : avail.state === 'scheduled'
+                    ? 'border-blue-200'
+                    : 'border-slate-200'
+                }`}
+              >
+                <div className="flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-100">
+                      {subjName}
+                    </span>
+
+                    {/* Dynamic Lifecycle & Availability Badge */}
+                    {avail.state === 'active' && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                        <Clock className="w-3 h-3 text-emerald-600" />
+                        Active Now • Closes in {avail.timeRemainingFormatted}
+                      </span>
+                    )}
+
+                    {avail.state === 'scheduled' && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                        <Calendar className="w-3 h-3 text-blue-600" />
+                        Scheduled • Opens in {avail.timeUntilStartFormatted}
+                      </span>
+                    )}
+
+                    {avail.state === 'expired' && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                        <Clock className="w-3 h-3 text-amber-600" />
+                        Expired Assessment
+                      </span>
+                    )}
+
+                    {avail.state === 'closed' && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-700 border border-slate-300">
+                        <Power className="w-3 h-3 text-slate-500" />
+                        Deactivated / Closed
+                      </span>
+                    )}
+
+                    {avail.state === 'draft' && (
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">
+                        Draft
+                      </span>
+                    )}
+
+                    {/* Batch / Badge Tag */}
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                      <Tag className="w-3 h-3 text-indigo-500" />
+                      {quiz.batchLabel || quiz.settings.batchLabel || 'Batch 2026/2027'}
+                    </span>
+
+                    {/* Automated Disappearance Pill */}
+                    <span
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border ${
+                        quiz.settings.autoDisappearOnExpiry ?? true
+                          ? 'bg-purple-50 text-purple-700 border-purple-200'
+                          : 'bg-slate-50 text-slate-600 border-slate-200'
+                      }`}
+                      title={
+                        quiz.settings.autoDisappearOnExpiry ?? true
+                          ? 'Assessment automatically disappears from student dashboard upon reaching end date'
+                          : 'Assessment remains in student archive indefinitely'
+                      }
+                    >
+                      <EyeOff className="w-3 h-3 text-purple-500" />
+                      {quiz.settings.autoDisappearOnExpiry ?? true
+                        ? 'Auto-Disappear from Student View'
+                        : 'Persistent in Archive'}
+                    </span>
+
+                    {/* Reactivation History Tag if previously reactivated */}
+                    {quiz.reactivationHistory && quiz.reactivationHistory.length > 0 && (
+                      <span
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 cursor-help"
+                        title={`Reactivated ${quiz.reactivationHistory.length} time(s). Last on ${new Date(
+                          quiz.reactivationHistory[quiz.reactivationHistory.length - 1].reactivatedAt
+                        ).toLocaleDateString()}`}
+                      >
+                        <RotateCcw className="w-3 h-3 text-emerald-600" />
+                        Reactivated ({quiz.reactivationHistory.length}x)
+                      </span>
+                    )}
+
+                    {theoryCount > 0 ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                        Hybrid ({theoryCount} Theory)
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                        100% Auto-Graded
+                      </span>
+                    )}
+                  </div>
+
+                  <h3 className="text-lg font-bold text-[#0F2A4A] mt-2">{quiz.title}</h3>
+                  <p className="text-xs text-slate-600 mt-1">{quiz.description}</p>
+
+                  {/* Scheduled Window Time Details */}
+                  <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs bg-slate-50/80 px-3 py-2 rounded-lg border border-slate-200/80">
+                    <div className="flex items-center gap-1.5 text-slate-600">
+                      <Calendar className="w-3.5 h-3.5 text-[#0F2A4A]" />
+                      <span className="font-semibold text-slate-700">Start:</span>{' '}
+                      {formatQuizDateTime(avail.startDate)}
+                    </div>
+                    <div className="text-slate-300">•</div>
+                    <div className="flex items-center gap-1.5 text-slate-600">
+                      <Clock className="w-3.5 h-3.5 text-rose-500" />
+                      <span className="font-semibold text-slate-700">Deadline / End:</span>{' '}
+                      {formatQuizDateTime(avail.endDate)}
+                    </div>
+                    {avail.isDisappeared && (
+                      <>
+                        <div className="text-slate-300">•</div>
+                        <span className="text-[11px] font-bold text-rose-600 flex items-center gap-1">
+                          <EyeOff className="w-3 h-3" /> Auto-Disappeared from Student Dashboard
+                        </span>
+                      </>
+                    )}
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-slate-50 p-3 rounded-lg border border-slate-100">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block uppercase">Total Questions</span>
+                      <span className="font-bold text-slate-800">
+                        {quiz.questions?.length || 0} ({objectiveCount} obj + {theoryCount} theory)
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block uppercase">Max Marks</span>
+                      <span className="font-bold text-emerald-600">{quiz.totalMarks} Marks</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block uppercase">Time Limit</span>
+                      <span className="font-bold text-slate-800">
+                        {quiz.settings.timeLimitMins > 0 ? `${quiz.settings.timeLimitMins} mins` : 'Untimed'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block uppercase">Submissions</span>
+                      <span className="font-bold text-blue-600">{attempts} Attempts</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-1.5 items-center">
+                    <span className="text-[11px] font-semibold text-slate-500">Assigned Classes:</span>
+                    {quiz.classIds?.map((cid) => (
+                      <span
+                        key={cid}
+                        className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700"
+                      >
+                        {getClassName(cid)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Right Action Column */}
+                <div className="shrink-0 flex flex-col items-end gap-2.5 w-full md:w-auto">
+                  {/* Primary Activation / Reactivation System Actions */}
+                  <div className="flex flex-wrap md:flex-col gap-2 w-full sm:w-auto">
+                    <button
+                      type="button"
+                      onClick={() => handleQuickToggleStatus(quiz)}
+                      className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer shadow-2xs ${
+                        isDeactivated
+                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600'
+                          : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
+                      }`}
+                      title={isDeactivated ? 'Activate quiz for students' : 'Deactivate quiz immediately'}
+                    >
+                      <Power className="w-3.5 h-3.5" />
+                      {isDeactivated ? 'Activate Quiz' : 'Deactivate Quiz'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setReactivationModalQuiz(quiz)}
+                      className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-all cursor-pointer shadow-2xs"
+                      title="Reactivate for same badge or promote to new badge with fresh dates"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-indigo-600" />
+                      Reactivate / Promote
+                    </button>
+                  </div>
+
+                  {/* Standard Operations: Preview, Duplicate, Edit, Delete */}
+                  <div className="flex items-center gap-1 border-t md:border-t-0 pt-2 md:pt-0 border-slate-100 w-full justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setPreviewQuiz(quiz)}
+                      className="p-1.5 rounded text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
+                      title="Preview Student View"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDuplicate(quiz)}
+                      className="p-1.5 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                      title="Duplicate quiz assessment"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openEditModal(quiz)}
+                      className="p-1.5 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                      title="Edit quiz assessment"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeleteTarget(quiz)}
+                      className="p-1.5 rounded text-rose-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                      title="Delete quiz assessment"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <span className="text-[11px] text-slate-400">
+                    Pass mark: {quiz.settings.passMarkPercent}%
+                  </span>
+                </div>
+              </div>
+            );
+          })}
       </div>
 
       {/* Add / Edit Quiz Modal with Detailed Radio Button Question Builder */}
@@ -744,13 +1067,24 @@ export const AdminQuizzesPage: React.FC = () => {
                   Set question prompts, define radio button answer choices, and mark correct keys for automatic submission grading.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleOpenPreviewFromBuilder}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 transition-colors shadow-2xs cursor-pointer"
+                  title="Test-run this quiz assessment in Student Preview Mode (no submission will be stored)"
+                >
+                  <Eye className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Preview Mode</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="text-slate-400 hover:text-slate-600 p-1 rounded-md hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             <form onSubmit={handleSave} className="mt-5 space-y-6">
@@ -834,17 +1168,18 @@ export const AdminQuizzesPage: React.FC = () => {
                   <label className="block text-xs font-semibold uppercase text-slate-700 mb-1">
                     Status
                   </label>
-                  <select
-                    value={formStatus}
-                    onChange={(e) =>
-                      setFormStatus(e.target.value as 'draft' | 'published' | 'closed')
-                    }
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:outline-hidden focus:border-[#0F2A4A]"
-                  >
-                    <option value="published">Published</option>
-                    <option value="draft">Draft (Hidden)</option>
-                    <option value="closed">Closed</option>
-                  </select>
+                    <select
+                      value={formStatus}
+                      onChange={(e) =>
+                        setFormStatus(e.target.value as 'draft' | 'published' | 'closed' | 'scheduled')
+                      }
+                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:outline-hidden focus:border-[#0F2A4A]"
+                    >
+                      <option value="published">Published</option>
+                      <option value="scheduled">Scheduled</option>
+                      <option value="draft">Draft (Hidden)</option>
+                      <option value="closed">Closed</option>
+                    </select>
                 </div>
               </div>
 
@@ -877,6 +1212,12 @@ export const AdminQuizzesPage: React.FC = () => {
                   })}
                 </div>
               </div>
+
+              {/* Automated Scheduling, Time-based Visibility & Batch Configuration */}
+              <QuizScheduleManager
+                values={formSchedule}
+                onChange={(updated) => setFormSchedule((prev) => ({ ...prev, ...updated }))}
+              />
 
               {/* QUESTIONS BUILDER SECTION WITH MULTI-QUESTION SECTIONS */}
               <div className="pt-4 border-t border-slate-200">
@@ -1593,14 +1934,25 @@ export const AdminQuizzesPage: React.FC = () => {
 
               {/* Submit Buttons */}
               <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={handleValidateQuiz}
-                  className="px-3.5 py-2.5 rounded-lg text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                >
-                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                  <span>Validate Quiz</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleValidateQuiz}
+                    className="px-3.5 py-2.5 rounded-lg text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                  >
+                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                    <span>Validate Quiz</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleOpenPreviewFromBuilder}
+                    className="px-3.5 py-2.5 rounded-lg text-xs font-semibold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                    title="Preview current quiz as a student"
+                  >
+                    <Eye className="w-4 h-4 text-amber-600" />
+                    <span>Preview Mode</span>
+                  </button>
+                </div>
 
                 <div className="flex items-center gap-2">
                   <button
@@ -1765,6 +2117,31 @@ export const AdminQuizzesPage: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Reactivation & Promotion Modal */}
+      {reactivationModalQuiz && (
+        <QuizReactivationModal
+          quiz={reactivationModalQuiz}
+          classes={classes}
+          isOpen={Boolean(reactivationModalQuiz)}
+          onClose={() => setReactivationModalQuiz(null)}
+          onUpdateQuiz={(updatedQuiz) => {
+            dataStore.saveQuiz(updatedQuiz);
+            setQuizzes(dataStore.getQuizzes());
+            setReactivationModalQuiz(null);
+          }}
+        />
+      )}
+
+      {/* Student Preview Mode Modal */}
+      {previewQuiz && (
+        <QuizStudentPreviewModal
+          quiz={previewQuiz}
+          isOpen={Boolean(previewQuiz)}
+          onClose={() => setPreviewQuiz(null)}
+          subjectName={getSubjectName(previewQuiz.subjectId)}
+        />
       )}
     </div>
   );

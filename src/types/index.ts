@@ -90,6 +90,17 @@ export interface QuizQuestion {
   sectionTitle?: string;
 }
 
+export interface QuizReactivationRecord {
+  reactivatedAt: string;
+  reactivatedBy: string;
+  batchLabel: string;
+  previousBatchLabel?: string;
+  targetClassIds: string[];
+  startDate?: string | null;
+  endDate?: string | null;
+  notes?: string;
+}
+
 export interface QuizSettings {
   timeLimitMins: number; // 0 = unlimited
   shuffleQuestions: boolean;
@@ -99,6 +110,15 @@ export interface QuizSettings {
   showCorrectAnswers: boolean;
   passMarkPercent: number;
   releaseResultsAt: string | null;
+  // Scheduling & automated visibility:
+  startDate?: string | null; // Assessment start date/time (ISO string)
+  endDate?: string | null; // Assessment end date/time (ISO string)
+  autoDisappearOnExpiry?: boolean; // Automatically remove from student dashboard when deadline passes
+  visibilityMode?: 'show_with_countdown' | 'hide_until_start'; // How assessment is shown before start date
+  batchLabel?: string; // e.g. "Batch 2026", "Spring 2026 Cohort", "Class of 2027"
+  reactivatedAt?: string | null;
+  reactivatedForBatch?: string | null;
+  reactivationHistory?: QuizReactivationRecord[];
 }
 
 export interface Quiz {
@@ -108,12 +128,17 @@ export interface Quiz {
   subjectId: string;
   classIds: string[];
   levelIds: string[];
-  status: 'draft' | 'published' | 'closed';
+  status: 'draft' | 'published' | 'closed' | 'scheduled';
   settings: QuizSettings;
   questions: QuizQuestion[];
   totalMarks: number;
   createdBy: string;
   createdAt: string;
+  startDate?: string | null;
+  endDate?: string | null;
+  isActive?: boolean;
+  batchLabel?: string;
+  reactivationHistory?: QuizReactivationRecord[];
 }
 
 export interface SubmissionAnswer {
@@ -150,6 +175,8 @@ export interface Submission {
   gradedAt?: string | null;
 }
 
+export type User = UserProfile;
+
 export interface AppNotification {
   id: string;
   title: string;
@@ -162,6 +189,10 @@ export interface AppNotification {
   createdBy: string;
   createdAt: string;
   expiresAt: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  autoDisappear?: boolean;
+  status?: 'published' | 'scheduled' | 'draft' | 'archived' | 'expired';
 }
 
 export interface NotificationRead {

@@ -11,11 +11,15 @@ import {
   AlertCircle,
   Check,
   Send,
+  Calendar,
+  Lock,
+  Tag,
 } from 'lucide-react';
 import { dataStore } from '@/src/services/dataStore';
 import { useAuth } from '@/src/context/AuthContext';
 import { Quiz, Submission, SubmissionAnswer } from '@/src/types';
 import { SECTION_DEFS, getQuestionSectionKey } from '@/src/pages/admin/AdminQuizzesPage';
+import { getQuizAvailability, formatQuizDateTime } from '@/src/utils/quizAvailability';
 import { toast } from 'sonner';
 
 export const StudentQuizzesPage: React.FC = () => {
@@ -30,11 +34,19 @@ export const StudentQuizzesPage: React.FC = () => {
   const [studentAnswers, setStudentAnswers] = useState<Record<string, string>>({});
   const [submittedResult, setSubmittedResult] = useState<Submission | null>(null);
 
-  const studentQuizzes = quizzes.filter(
-    (q) =>
-      q.status === 'published' &&
-      (!profile?.classIds.length || q.classIds.some((cid) => profile.classIds.includes(cid)))
-  );
+  // Filter quizzes by class stream & automated disappearance / scheduled start
+  const studentQuizzes = quizzes.filter((q) => {
+    const matchesClass =
+      !profile?.classIds?.length || q.classIds?.some((cid) => profile.classIds.includes(cid));
+    if (!matchesClass) return false;
+
+    const avail = getQuizAvailability(q);
+    // If end date has elapsed and autoDisappear is enabled or deactivated, quiz automatically disappears
+    if (avail.shouldDisappearFromDashboard) {
+      return false;
+    }
+    return true;
+  });
 
   const getSubjectName = (subjId: string) => subjects.find((s) => s.id === subjId)?.name || subjId;
 
@@ -43,6 +55,11 @@ export const StudentQuizzesPage: React.FC = () => {
   };
 
   const handleStartQuiz = (quiz: Quiz) => {
+    const avail = getQuizAvailability(quiz);
+    if (!avail.isAvailableForStudent) {
+      toast.error(avail.message);
+      return;
+    }
     setActiveQuiz(quiz);
     setStudentAnswers({});
     setSubmittedResult(null);
@@ -161,87 +178,162 @@ export const StudentQuizzesPage: React.FC = () => {
 
       {/* Quizzes List */}
       <div className="space-y-4">
-        {studentQuizzes.map((quiz) => {
-          const pastSub = getStudentSubmission(quiz.id);
-          const subjName = getSubjectName(quiz.subjectId);
-          const isCompleted = !!pastSub;
+        {studentQuizzes.length === 0 ? (
+          <div className="bg-white p-8 rounded-xl border border-dashed border-slate-300 text-center text-slate-500">
+            <FileQuestion className="w-10 h-10 text-slate-400 mx-auto mb-2 opacity-50" />
+            <h3 className="text-sm font-bold text-slate-700">No Assessments Available</h3>
+            <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+              Any tests scheduled for your class will appear here when active. Quizzes with auto-disappearance are removed after their deadline expires.
+            </p>
+          </div>
+        ) : (
+          studentQuizzes.map((quiz) => {
+            const pastSub = getStudentSubmission(quiz.id);
+            const subjName = getSubjectName(quiz.subjectId);
+            const isCompleted = !!pastSub;
+            const avail = getQuizAvailability(quiz);
 
-          return (
-            <div
-              key={quiz.id}
-              className="bg-white p-6 rounded-xl border border-slate-200 shadow-2xs hover:shadow-xs transition-shadow flex flex-col md:flex-row md:items-center justify-between gap-6"
-            >
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="px-2.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-100">
-                    {subjName}
-                  </span>
-                  {isCompleted && (
-                    <span
-                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                        pastSub.status === 'pending_manual'
-                          ? 'bg-amber-100 text-amber-800'
-                          : 'bg-emerald-100 text-emerald-800'
-                      }`}
-                    >
-                      {pastSub.status === 'pending_manual' ? (
-                        <>
-                          <Clock className="w-3 h-3 text-amber-600" /> Theory Awaiting Marks ({pastSub.percent}%)
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Completed ({pastSub.percent}%)
-                        </>
-                      )}
+            return (
+              <div
+                key={quiz.id}
+                className={`bg-white p-6 rounded-xl border shadow-2xs hover:shadow-xs transition-shadow flex flex-col md:flex-row md:items-center justify-between gap-6 ${
+                  avail.state === 'active'
+                    ? 'border-emerald-200'
+                    : avail.state === 'scheduled'
+                    ? 'border-blue-200'
+                    : 'border-slate-200'
+                }`}
+              >
+                <div className="flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-100">
+                      {subjName}
                     </span>
-                  )}
+
+                    {/* Dynamic Availability & Countdown Badge */}
+                    {avail.state === 'active' && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                        <Clock className="w-3 h-3 text-emerald-600" />
+                        Open Now • Closes in {avail.timeRemainingFormatted}
+                      </span>
+                    )}
+
+                    {avail.state === 'scheduled' && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                        <Calendar className="w-3 h-3 text-blue-600" />
+                        Opens in {avail.timeUntilStartFormatted}
+                      </span>
+                    )}
+
+                    {/* Batch / Badge Tag */}
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                      <Tag className="w-3 h-3 text-indigo-500" />
+                      {quiz.batchLabel || quiz.settings.batchLabel || 'Batch 2026/2027'}
+                    </span>
+
+                    {isCompleted && (
+                      <span
+                        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                          pastSub.status === 'pending_manual'
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-emerald-100 text-emerald-800'
+                        }`}
+                      >
+                        {pastSub.status === 'pending_manual' ? (
+                          <>
+                            <Clock className="w-3 h-3 text-amber-600" /> Theory Awaiting Marks ({pastSub.percent}%)
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Completed ({pastSub.percent}%)
+                          </>
+                        )}
+                      </span>
+                    )}
+                  </div>
+
+                  <h3 className="text-lg font-bold text-[#0F2A4A] mt-2">{quiz.title}</h3>
+                  <p className="text-xs text-slate-600 mt-1 max-w-2xl">{quiz.description}</p>
+
+                  {/* Scheduled Window Time Details */}
+                  <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 bg-slate-50/70 px-3 py-1.5 rounded-lg border border-slate-100 max-w-fit">
+                    <span className="flex items-center gap-1 text-slate-600">
+                      <Calendar className="w-3.5 h-3.5 text-[#0F2A4A]" />
+                      <strong className="text-slate-700">Starts:</strong> {formatQuizDateTime(avail.startDate)}
+                    </span>
+                    <span className="text-slate-300">•</span>
+                    <span className="flex items-center gap-1 text-slate-600">
+                      <Clock className="w-3.5 h-3.5 text-rose-500" />
+                      <strong className="text-slate-700">Deadline:</strong> {formatQuizDateTime(avail.endDate)}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-4 text-xs text-slate-500">
+                    <span className="flex items-center gap-1 font-semibold text-slate-700">
+                      <Award className="w-4 h-4 text-emerald-600" /> {quiz.totalMarks} Total Marks ({quiz.questions?.length || 0} Questions)
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Clock className="w-4 h-4 text-slate-400" />
+                      {quiz.settings.timeLimitMins > 0 ? `${quiz.settings.timeLimitMins} Minutes Limit` : 'Untimed'}
+                    </span>
+                    <span>Pass mark: {quiz.settings.passMarkPercent}%</span>
+                  </div>
                 </div>
 
-                <h3 className="text-lg font-bold text-[#0F2A4A] mt-2">{quiz.title}</h3>
-                <p className="text-xs text-slate-600 mt-1 max-w-2xl">{quiz.description}</p>
-
-                <div className="mt-4 flex flex-wrap gap-4 text-xs text-slate-500">
-                  <span className="flex items-center gap-1 font-semibold text-slate-700">
-                    <Award className="w-4 h-4 text-emerald-600" /> {quiz.totalMarks} Total Marks ({quiz.questions?.length || 0} Questions)
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Clock className="w-4 h-4 text-slate-400" />
-                    {quiz.settings.timeLimitMins > 0 ? `${quiz.settings.timeLimitMins} Minutes Limit` : 'Untimed'}
-                  </span>
-                  <span>Pass mark: {quiz.settings.passMarkPercent}%</span>
-                </div>
-              </div>
-
-              <div className="shrink-0 flex flex-col sm:flex-row gap-2">
-                {isCompleted ? (
-                  <div className="flex items-center gap-2">
-                    <Link
-                      to="/results"
-                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 transition-colors shadow-2xs"
-                    >
-                      Review Result ({pastSub.percent}%)
-                    </Link>
+                <div className="shrink-0 flex flex-col sm:flex-row gap-2">
+                  {isCompleted ? (
+                    <div className="flex items-center gap-2">
+                      <Link
+                        to="/results"
+                        className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 transition-colors shadow-2xs"
+                      >
+                        Review Result ({pastSub.percent}%)
+                      </Link>
+                      {avail.isAvailableForStudent ? (
+                        <button
+                          type="button"
+                          onClick={() => handleStartQuiz(quiz)}
+                          className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg bg-[#0F2A4A] hover:bg-[#163c68] text-white text-xs font-semibold transition-colors shadow-2xs cursor-pointer"
+                        >
+                          Retake Quiz
+                        </button>
+                      ) : (
+                        <span
+                          className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg bg-slate-100 text-slate-400 text-xs font-semibold border border-slate-200 cursor-not-allowed"
+                          title="Assessment is currently outside its active schedule window."
+                        >
+                          <Lock className="w-3.5 h-3.5" /> Retake Locked
+                        </span>
+                      )}
+                    </div>
+                  ) : avail.isAvailableForStudent ? (
                     <button
                       type="button"
                       onClick={() => handleStartQuiz(quiz)}
-                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg bg-[#0F2A4A] hover:bg-[#163c68] text-white text-xs font-semibold transition-colors shadow-2xs"
+                      className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-[#0F2A4A] hover:bg-[#163c68] text-white text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
                     >
-                      Retake Quiz
+                      Take Quiz Now <ArrowRight className="w-4 h-4" />
                     </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => handleStartQuiz(quiz)}
-                    className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-[#0F2A4A] hover:bg-[#163c68] text-white text-xs font-semibold shadow-2xs transition-colors"
-                  >
-                    Take Quiz Now <ArrowRight className="w-4 h-4" />
-                  </button>
-                )}
+                  ) : (
+                    <div className="flex flex-col items-end gap-1">
+                      <button
+                        type="button"
+                        disabled
+                        className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-500 text-xs font-semibold cursor-not-allowed shadow-2xs"
+                        title={`Opens on ${formatQuizDateTime(avail.startDate)}`}
+                      >
+                        <Lock className="w-3.5 h-3.5 text-slate-400" /> Opens in {avail.timeUntilStartFormatted}
+                      </button>
+                      <span className="text-[10px] text-slate-400">
+                        {avail.timeUntilStartFormatted ? `Unlocks in ${avail.timeUntilStartFormatted}` : 'Scheduled'}
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })
+        )}
       </div>
 
       {/* QUIZ TAKING MODAL WITH RADIO BUTTON ANSWERS */}
