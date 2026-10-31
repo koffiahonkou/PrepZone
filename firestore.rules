@@ -117,6 +117,25 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // INQUIRIES & STUDENT-TEACHER Q&A
+    // Students can read and create their own questions.
+    // Assigned teachers and staff can read, reply, and update inquiry status.
+    match /inquiries/{inquiryId} {
+      allow read: if isStaff() || (
+        isSignedIn() && (
+          resource.data.studentId == request.auth.uid ||
+          resource.data.teacherId == request.auth.uid
+        )
+      );
+      allow create: if isSignedIn() && request.resource.data.studentId == request.auth.uid;
+      allow update: if isStaff() || (
+        isSignedIn() && resource.data.studentId == request.auth.uid
+      );
+      allow delete: if isAdmin() || (
+        isSignedIn() && resource.data.studentId == request.auth.uid && resource.data.status == 'pending'
+      );
+    }
+
     // NOTIFICATIONS
     // Writable by staff and admins. Readable by all signed-in users.
     match /notifications/{notificationId} {

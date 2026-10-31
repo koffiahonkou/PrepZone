@@ -197,6 +197,33 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["appName", "defaultPassMarkPercent", "academicTermLabel"]
+    },
+    "Inquiry": {
+      "title": "Inquiry",
+      "description": "Student question to assigned subject teacher with threaded messages and status",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "studentUsername": { "type": "string" },
+        "classId": { "type": "string" },
+        "className": { "type": "string" },
+        "subjectId": { "type": "string" },
+        "subjectName": { "type": "string" },
+        "subjectCode": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "teacherName": { "type": "string" },
+        "title": { "type": "string", "maxLength": 200 },
+        "question": { "type": "string" },
+        "priority": { "type": "string", "enum": ["normal", "urgent"] },
+        "status": { "type": "string", "enum": ["pending", "answered", "resolved"] },
+        "messages": { "type": "array" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "resolvedAt": { "type": "string" }
+      },
+      "required": ["id", "studentId", "classId", "subjectId", "teacherId", "title", "question", "status", "messages", "createdAt"]
     }
   },
   "firestore": {
@@ -231,6 +258,10 @@
     "/submissions/{submissionId}": {
       "schema": { "$ref": "#/entities/Submission" },
       "description": "Student quiz attempts and grades"
+    },
+    "/inquiries/{inquiryId}": {
+      "schema": { "$ref": "#/entities/Inquiry" },
+      "description": "Student-to-teacher academic questions and dialogue threads"
     },
     "/notifications/{notificationId}": {
       "schema": { "$ref": "#/entities/Notification" },

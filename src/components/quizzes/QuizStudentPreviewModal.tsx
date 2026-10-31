@@ -18,10 +18,11 @@ import {
   Info,
   ShieldCheck,
   ArrowRight,
+  Loader2,
 } from 'lucide-react';
 import { Quiz, QuizQuestion, Submission, SubmissionAnswer } from '@/src/types';
 import { SECTION_DEFS, getQuestionSectionKey } from '@/src/pages/admin/AdminQuizzesPage';
-import { QuizSubmissionCelebration } from '@/src/components/quizzes/QuizSubmissionCelebration';
+import { SuccessCelebration } from '@/src/components/quizzes/SuccessCelebration';
 import { toast } from 'sonner';
 
 interface QuizStudentPreviewModalProps {
@@ -42,6 +43,8 @@ export const QuizStudentPreviewModal: React.FC<QuizStudentPreviewModalProps> = (
   // Sandbox state
   const [studentAnswers, setStudentAnswers] = useState<Record<string, string>>({});
   const [submittedResult, setSubmittedResult] = useState<Submission | null>(null);
+  const [submissionStatus, setSubmissionStatus] = useState<'idle' | 'loading' | 'submitted' | 'error'>('idle');
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
   const [deviceMode, setDeviceMode] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
   const [showAnswerKey, setShowAnswerKey] = useState<boolean>(false);
 
@@ -65,6 +68,7 @@ export const QuizStudentPreviewModal: React.FC<QuizStudentPreviewModalProps> = (
   };
 
   const handleSelectRadioOption = (questionId: string, optionId: string) => {
+    if (submissionStatus === 'loading') return;
     setStudentAnswers((prev) => ({
       ...prev,
       [questionId]: optionId,
@@ -74,13 +78,22 @@ export const QuizStudentPreviewModal: React.FC<QuizStudentPreviewModalProps> = (
   const handleResetSandbox = () => {
     setStudentAnswers({});
     setSubmittedResult(null);
+    setSubmissionStatus('idle');
+    setSubmissionError(null);
     setSecondsRemaining(totalSeconds);
     setIsTimerActive(true);
     toast.info('Preview session reset. Try different answers!');
   };
 
-  const handleSubmitSimulatedQuiz = (e: React.FormEvent) => {
+  const handleSubmitSimulatedQuiz = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submissionStatus === 'loading') return;
+
+    setSubmissionStatus('loading');
+    setSubmissionError(null);
+
+    // Simulate realistic API latency
+    await new Promise((res) => setTimeout(res, 600));
 
     // Run identical auto-grading algorithm WITHOUT saving to database
     let autoScore = 0;
@@ -165,8 +178,9 @@ export const QuizStudentPreviewModal: React.FC<QuizStudentPreviewModalProps> = (
     };
 
     setSubmittedResult(simulatedSubmission);
+    setSubmissionStatus('submitted');
     setIsTimerActive(false);
-    toast.success('Simulated submission complete! Scored without saving to database.');
+    toast.success('Simulated submission complete! Triggered SuccessCelebration.');
   };
 
   // Device width wrapper
@@ -315,7 +329,7 @@ export const QuizStudentPreviewModal: React.FC<QuizStudentPreviewModalProps> = (
             {submittedResult ? (
               /* SIMULATED SUBMISSION RESULT REVIEW SCREEN WITH CELEBRATORY ANIMATION */
               <div className="p-6 sm:p-8 space-y-6">
-                <QuizSubmissionCelebration
+                <SuccessCelebration
                   submission={submittedResult}
                   quiz={quiz}
                   onDone={handleResetSandbox}
@@ -618,17 +632,32 @@ export const QuizStudentPreviewModal: React.FC<QuizStudentPreviewModalProps> = (
                   <div className="flex items-center gap-2 self-end sm:self-auto">
                     <button
                       type="button"
+                      disabled={submissionStatus === 'loading'}
                       onClick={onClose}
-                      className="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-200/80 transition-colors cursor-pointer"
+                      className="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-200/80 disabled:opacity-50 transition-colors cursor-pointer"
                     >
                       Exit Preview
                     </button>
                     <button
                       type="submit"
-                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+                      disabled={submissionStatus === 'loading'}
+                      className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer ${
+                        submissionStatus === 'loading'
+                          ? 'bg-blue-600 opacity-80 cursor-wait'
+                          : 'bg-emerald-600 hover:bg-emerald-700'
+                      }`}
                     >
-                      <Send className="w-3.5 h-3.5" />
-                      <span>Submit Quiz as Student (Simulated)</span>
+                      {submissionStatus === 'loading' ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Simulating Submission...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Send className="w-3.5 h-3.5" />
+                          <span>Submit Quiz as Student (Simulated)</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>

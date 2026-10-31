@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   GraduationCap,
@@ -21,10 +21,11 @@ import {
   Check,
   ChevronRight,
   ExternalLink,
+  MessageSquareQuote,
 } from 'lucide-react';
 import { useAuth } from '@/src/context/AuthContext';
 import { dataStore } from '@/src/services/dataStore';
-import { Quiz, Submission, AcademicClass, Lesson, AppNotification } from '@/src/types';
+import { Quiz, Submission, AcademicClass, Lesson, AppNotification, StudentInquiry } from '@/src/types';
 import { getQuizAvailability, formatQuizDateTime } from '@/src/utils/quizAvailability';
 import { getAnnouncementAvailability, formatAnnouncementDateTime } from '@/src/utils/announcementAvailability';
 import { QuizReactivationModal } from '@/src/components/quizzes/QuizReactivationModal';
@@ -41,6 +42,19 @@ export const TeacherDashboard: React.FC = () => {
   const [submissions, setSubmissions] = useState<Submission[]>(() => dataStore.getSubmissions());
   const notifications = useMemo(() => dataStore.getNotifications(), []);
   const users = useMemo(() => dataStore.getUsers(), []);
+
+  const [inquiries, setInquiries] = useState<StudentInquiry[]>(() => dataStore.getInquiries());
+  useEffect(() => {
+    const handleInq = () => setInquiries(dataStore.getInquiries());
+    window.addEventListener('eduform_inquiries_updated', handleInq);
+    return () => window.removeEventListener('eduform_inquiries_updated', handleInq);
+  }, []);
+
+  const pendingInquiries = useMemo(() => {
+    return inquiries.filter(
+      (inq) => inq.status === 'pending' && dataStore.isTeacherAssignedToInquiry(inq, profile)
+    );
+  }, [inquiries, profile]);
 
   // Reactivation modal state for teacher
   const [reactivationQuiz, setReactivationQuiz] = useState<Quiz | null>(null);
@@ -127,6 +141,16 @@ export const TeacherDashboard: React.FC = () => {
                 <Plus className="w-3.5 h-3.5" /> Create Quiz
               </Link>
               <Link
+                to="/admin/inquiries"
+                className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold backdrop-blur-xs transition-colors border ${
+                  pendingInquiries.length > 0
+                    ? 'bg-amber-400 text-slate-950 border-amber-300 font-bold animate-pulse'
+                    : 'bg-white/15 hover:bg-white/25 text-white border-white/20'
+                }`}
+              >
+                <MessageSquareQuote className="w-3.5 h-3.5" /> Student Inquiries ({pendingInquiries.length})
+              </Link>
+              <Link
                 to="/admin/quizzes?filter=old_reactivation"
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white/15 hover:bg-white/25 text-white text-xs font-semibold backdrop-blur-xs transition-colors"
               >
@@ -149,25 +173,53 @@ export const TeacherDashboard: React.FC = () => {
 
           <div className="bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/15 text-xs space-y-2 shrink-0 md:w-64">
             <span className="font-semibold text-emerald-300 block uppercase tracking-wider text-[10px]">
-              Grading Summary
+              Desk Summary
             </span>
             <div className="flex justify-between items-center text-slate-200">
-              <span>Total Submissions:</span>
-              <strong className="text-white">{submissions.length}</strong>
+              <span>Pending Questions:</span>
+              <strong className={pendingInquiries.length > 0 ? "text-amber-300 font-bold" : "text-white"}>
+                {pendingInquiries.length}
+              </strong>
             </div>
             <div className="flex justify-between items-center text-slate-200">
               <span>Awaiting Theory Marks:</span>
               <strong className="text-amber-300 font-bold">{pendingTheorySubmissions.length}</strong>
             </div>
             <div className="flex justify-between items-center text-slate-200">
-              <span>Fully Graded:</span>
-              <strong className="text-emerald-300">
-                {submissions.filter((s) => s.status === 'fully_graded').length}
-              </strong>
+              <span>Total Submissions:</span>
+              <strong className="text-white">{submissions.length}</strong>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Alert Card for Pending Student Inquiries if any */}
+      {pendingInquiries.length > 0 && (
+        <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
+              <MessageSquareQuote className="w-5 h-5 text-amber-700" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-amber-950 flex items-center gap-2">
+                Student Inquiries Awaiting Your Response ({pendingInquiries.length})
+              </h3>
+              <p className="text-xs text-amber-800 mt-0.5">
+                Students in your class streams have submitted academic questions in your subjects. Review and
+                provide explanations to support their learning.
+              </p>
+            </div>
+          </div>
+
+          <Link
+            to="/admin/inquiries"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-colors shrink-0 shadow-2xs"
+          >
+            <span>Open Inquiries Inbox</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
+      )}
 
       {/* Metric Action Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

@@ -227,3 +227,37 @@ export interface SystemSettings {
   academicTermLabel: string;
   updatedAt?: string;
 }
+
+export type InquiryStatus = 'pending' | 'answered' | 'resolved';
+
+export interface InquiryMessage {
+  id: string;
+  authorId: string;
+  authorName: string;
+  authorRole: UserRole;
+  content: string;
+  createdAt: string;
+}
+
+export interface StudentInquiry {
+  id: string;
+  studentId: string;
+  studentName: string;
+  studentUsername: string;
+  classId: string;
+  className: string;
+  subjectId: string;
+  subjectName: string;
+  subjectCode: string;
+  teacherId: string;
+  teacherName: string;
+  title: string;
+  question: string;
+  priority: 'normal' | 'urgent';
+  status: InquiryStatus;
+  messages: InquiryMessage[];
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt?: string | null;
+}
+

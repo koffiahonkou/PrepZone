@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   BookOpen,
@@ -21,6 +21,7 @@ import {
   Check,
   Sun,
   Moon,
+  MessageSquareQuote,
 } from 'lucide-react';
 import { useAuth } from '@/src/context/AuthContext';
 import { useColorMode } from '@/src/context/ColorModeContext';
@@ -35,6 +36,8 @@ interface NavItem {
   to: string;
   icon: React.ComponentType<{ className?: string }>;
   end?: boolean;
+  badge?: number;
+  badgeColor?: string;
 }
 
 export const AppLayout: React.FC = () => {
@@ -107,11 +110,45 @@ export const AppLayout: React.FC = () => {
     }
   };
 
+  const [inquiries, setInquiries] = useState(() => dataStore.getInquiries());
+
+  useEffect(() => {
+    const handleInqUpdate = () => {
+      setInquiries(dataStore.getInquiries());
+    };
+    window.addEventListener('eduform_inquiries_updated', handleInqUpdate);
+    return () => window.removeEventListener('eduform_inquiries_updated', handleInqUpdate);
+  }, []);
+
+  // Compute pending questions for teacher or admin
+  const pendingInquiriesCount = useMemo(() => {
+    if (isAdmin) return inquiries.filter((i) => i.status === 'pending').length;
+    if (isTeacher) {
+      return inquiries.filter(
+        (i) => i.status === 'pending' && dataStore.isTeacherAssignedToInquiry(i, profile)
+      ).length;
+    }
+    return 0;
+  }, [inquiries, isAdmin, isTeacher, profile]);
+
+  // Compute answered questions for student
+  const studentAnsweredCount = useMemo(() => {
+    if (!profile?.uid) return 0;
+    return inquiries.filter((i) => i.studentId === profile.uid && i.status === 'answered').length;
+  }, [inquiries, profile]);
+
   const adminNavItems: NavItem[] = [
     { label: 'Admin Overview', to: '/admin', icon: Home, end: true },
     { label: 'User Directory', to: '/admin/users', icon: Users },
     { label: 'Classes & Streams', to: '/admin/classes', icon: Layers },
     { label: 'Academic Subjects', to: '/admin/subjects', icon: GraduationCap },
+    {
+      label: 'Student Inquiries',
+      to: '/admin/inquiries',
+      icon: MessageSquareQuote,
+      badge: pendingInquiriesCount,
+      badgeColor: 'bg-amber-400 text-slate-950 font-bold',
+    },
     { label: 'Lesson Notes', to: '/admin/lessons', icon: BookOpen },
     { label: 'Quiz Builder', to: '/admin/quizzes', icon: FileQuestion },
     { label: 'Submissions Queue', to: '/admin/submissions', icon: ClipboardList },
@@ -122,6 +159,13 @@ export const AppLayout: React.FC = () => {
 
   const teacherNavItems: NavItem[] = [
     { label: 'Teacher Dashboard', to: '/dashboard', icon: Home, end: true },
+    {
+      label: 'Student Inquiries',
+      to: '/admin/inquiries',
+      icon: MessageSquareQuote,
+      badge: pendingInquiriesCount,
+      badgeColor: 'bg-amber-400 text-slate-950 font-bold',
+    },
     { label: 'Lesson Notes', to: '/admin/lessons', icon: BookOpen },
     { label: 'Quiz Builder', to: '/admin/quizzes', icon: FileQuestion },
     { label: 'Submissions Queue', to: '/admin/submissions', icon: ClipboardList },
@@ -131,6 +175,13 @@ export const AppLayout: React.FC = () => {
 
   const studentNavItems: NavItem[] = [
     { label: 'Student Dashboard', to: '/dashboard', icon: Home, end: true },
+    {
+      label: 'Ask a Teacher',
+      to: '/ask-teacher',
+      icon: MessageSquareQuote,
+      badge: studentAnsweredCount,
+      badgeColor: 'bg-emerald-500 text-white font-bold',
+    },
     { label: 'Lesson Library', to: '/lessons', icon: BookOpen },
     { label: 'Assigned Quizzes', to: '/quizzes', icon: FileQuestion },
     { label: 'My Quiz Results', to: '/results', icon: Award },
@@ -383,15 +434,26 @@ export const AppLayout: React.FC = () => {
                   to={item.to}
                   end={item.end}
                   className={({ isActive }) =>
-                    `flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
+                    `flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
                       isActive
                         ? 'bg-emerald-500 text-white font-semibold shadow-xs'
                         : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                     }`
                   }
                 >
-                  <Icon className="w-4 h-4 shrink-0" />
-                  <span>{item.label}</span>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Icon className="w-4 h-4 shrink-0" />
+                    <span className="truncate">{item.label}</span>
+                  </div>
+                  {Boolean(item.badge && item.badge > 0) && (
+                    <span
+                      className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                        item.badgeColor || 'bg-emerald-500 text-white'
+                      }`}
+                    >
+                      {item.badge}
+                    </span>
+                  )}
                 </NavLink>
               );
             })}
@@ -461,15 +523,26 @@ export const AppLayout: React.FC = () => {
                       end={item.end}
                       onClick={() => setSidebarOpen(false)}
                       className={({ isActive }) =>
-                        `flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
+                        `flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
                           isActive
                             ? 'bg-emerald-500 text-white font-semibold'
                             : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                         }`
                       }
                     >
-                      <Icon className="w-4 h-4 shrink-0" />
-                      <span>{item.label}</span>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <Icon className="w-4 h-4 shrink-0" />
+                        <span className="truncate">{item.label}</span>
+                      </div>
+                      {Boolean(item.badge && item.badge > 0) && (
+                        <span
+                          className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                            item.badgeColor || 'bg-emerald-500 text-white'
+                          }`}
+                        >
+                          {item.badge}
+                        </span>
+                      )}
                     </NavLink>
                   );
                 })}

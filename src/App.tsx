@@ -23,6 +23,8 @@ import { StudentLessonsPage } from './pages/student/StudentLessonsPage';
 import { StudentQuizzesPage } from './pages/student/StudentQuizzesPage';
 import { StudentResultsPage } from './pages/student/StudentResultsPage';
 import { StudentNotificationsPage } from './pages/student/StudentNotificationsPage';
+import { StudentAskTeacherPage } from './pages/student/StudentAskTeacherPage';
+import { TeacherInquiriesPage } from './pages/teacher/TeacherInquiriesPage';
 import { StagePlaceholderPage } from './pages/common/StagePlaceholderPage';
 
 const queryClient = new QueryClient({
@@ -77,6 +79,7 @@ export default function App() {
               />
               <Route path="/results" element={<StudentResultsPage />} />
               <Route path="/results/:submissionId" element={<StudentResultsPage />} />
+              <Route path="/ask-teacher" element={<StudentAskTeacherPage />} />
               <Route path="/notifications" element={<StudentNotificationsPage />} />
 
               {/* Academic Authoring & Grading Routes (Admin & Teacher) */}
@@ -87,6 +90,7 @@ export default function App() {
                   </RoleRoute>
                 }
               >
+                <Route path="/admin/inquiries" element={<TeacherInquiriesPage />} />
                 <Route path="/admin/lessons" element={<AdminLessonsPage />} />
                 <Route path="/admin/quizzes" element={<AdminQuizzesPage />} />
                 <Route

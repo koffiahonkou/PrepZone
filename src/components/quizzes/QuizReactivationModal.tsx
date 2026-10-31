@@ -73,16 +73,18 @@ export const QuizReactivationModal: React.FC<QuizReactivationModalProps> = ({
       status: desiredStatus,
       isActive: isActivating,
       // If activating and end date was in the past, clear end date or extend so it doesn't immediately expire
+      startDate: quiz.startDate ?? null,
       endDate:
         isActivating && quiz.endDate && new Date(quiz.endDate).getTime() < Date.now()
           ? new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().slice(0, 16)
-          : quiz.endDate,
+          : quiz.endDate ?? null,
       settings: {
         ...quiz.settings,
+        startDate: quiz.settings?.startDate ?? null,
         endDate:
-          isActivating && quiz.settings.endDate && new Date(quiz.settings.endDate).getTime() < Date.now()
+          isActivating && quiz.settings?.endDate && new Date(quiz.settings.endDate).getTime() < Date.now()
             ? new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().slice(0, 16)
-            : quiz.settings.endDate,
+            : quiz.settings?.endDate ?? null,
       },
     };
 

@@ -15,14 +15,19 @@ import {
   Lock,
   Tag,
   ShieldAlert,
+  Loader2,
+  AlertTriangle,
+  RotateCcw,
 } from 'lucide-react';
 import { dataStore } from '@/src/services/dataStore';
 import { useAuth } from '@/src/context/AuthContext';
 import { Quiz, Submission, SubmissionAnswer } from '@/src/types';
 import { SECTION_DEFS, getQuestionSectionKey } from '@/src/pages/admin/AdminQuizzesPage';
 import { getQuizAvailability, formatQuizDateTime } from '@/src/utils/quizAvailability';
-import { QuizSubmissionCelebration } from '@/src/components/quizzes/QuizSubmissionCelebration';
+import { SuccessCelebration } from '@/src/components/quizzes/SuccessCelebration';
 import { toast } from 'sonner';
+
+export type QuizSubmissionStatus = 'idle' | 'loading' | 'submitted' | 'error';
 
 export const StudentQuizzesPage: React.FC = () => {
   const { profile } = useAuth();
@@ -36,6 +41,8 @@ export const StudentQuizzesPage: React.FC = () => {
   const [activeQuiz, setActiveQuiz] = useState<Quiz | null>(null);
   const [studentAnswers, setStudentAnswers] = useState<Record<string, string>>({});
   const [submittedResult, setSubmittedResult] = useState<Submission | null>(null);
+  const [submissionStatus, setSubmissionStatus] = useState<QuizSubmissionStatus>('idle');
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
 
   // Filter quizzes by class stream & automated disappearance / scheduled start
   const studentQuizzes = quizzes.filter((q) => {
@@ -73,26 +80,34 @@ export const StudentQuizzesPage: React.FC = () => {
     setActiveQuiz(quiz);
     setStudentAnswers({});
     setSubmittedResult(null);
+    setSubmissionStatus('idle');
+    setSubmissionError(null);
   };
 
   const handleSelectRadioOption = (questionId: string, optionId: string) => {
+    if (submissionStatus === 'loading') return;
     setStudentAnswers((prev) => ({
       ...prev,
       [questionId]: optionId,
     }));
   };
 
-  const handleSubmitQuiz = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmitQuiz = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!activeQuiz) return;
+    if (submissionStatus === 'loading') return;
 
     // Strict safeguard: verify no submission exists
     const existingSub = getStudentSubmission(activeQuiz.id);
     if (existingSub) {
       toast.error('You have already submitted this assessment. Multiple submissions are not permitted.');
       setActiveQuiz(null);
+      setSubmissionStatus('idle');
       return;
     }
+
+    setSubmissionStatus('loading');
+    setSubmissionError(null);
 
     // Run Pass 1 Auto-Grading immediately
     let autoScore = 0;
@@ -153,7 +168,7 @@ export const StudentQuizzesPage: React.FC = () => {
 
     const totalPossible = autoTotal + manualTotal;
     const totalScore = autoScore;
-    const percent = Math.round((totalScore / totalPossible) * 100);
+    const percent = totalPossible > 0 ? Math.round((totalScore / totalPossible) * 100) : 0;
 
     const newSubmission: Submission = {
       id: `sub-${Date.now()}`,
@@ -177,16 +192,25 @@ export const StudentQuizzesPage: React.FC = () => {
       gradedAt: hasTheory ? null : new Date().toISOString(),
     };
 
-    const saved = dataStore.saveSubmission(newSubmission);
-    if (!saved) {
-      toast.error('Assessment has already been submitted. Retakes are not permitted.');
-      setActiveQuiz(null);
-      return;
-    }
+    try {
+      const response = await dataStore.submitAssessmentApi(newSubmission);
+      if (!response.success || !response.data) {
+        throw new Error(response.error || 'Failed to submit assessment to server.');
+      }
 
-    setSubmissions(dataStore.getSubmissions());
-    setSubmittedResult(newSubmission);
-    toast.success('Quiz submitted and auto-graded successfully!');
+      // Successful API submission response triggers SuccessCelebration
+      setSubmissions(dataStore.getSubmissions());
+      setSubmittedResult(response.data);
+      setSubmissionStatus('submitted');
+      setSubmissionError(null);
+      toast.success('Quiz submitted and auto-graded successfully!');
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : 'Submission failed. Please check your connection and retry.';
+      setSubmissionStatus('error');
+      setSubmissionError(msg);
+      toast.error(msg);
+    }
   };
 
   return (
@@ -386,12 +410,14 @@ export const StudentQuizzesPage: React.FC = () => {
             ) : submittedResult ? (
               /* INSTANT POST-SUBMISSION RESULTS SUMMARY WITH CELEBRATORY ANIMATIONS */
               <div className="space-y-6">
-                <QuizSubmissionCelebration
+                <SuccessCelebration
                   submission={submittedResult}
                   quiz={activeQuiz}
                   onDone={() => {
                     setActiveQuiz(null);
                     setSubmittedResult(null);
+                    setSubmissionStatus('idle');
+                    setSubmissionError(null);
                   }}
                   onViewAnalytics={() => navigate('/results')}
                   onScrollToReview={() => {
@@ -491,6 +517,8 @@ export const StudentQuizzesPage: React.FC = () => {
                       onClick={() => {
                         setActiveQuiz(null);
                         setSubmittedResult(null);
+                        setSubmissionStatus('idle');
+                        setSubmissionError(null);
                       }}
                       className="px-5 py-2.5 rounded-lg text-xs font-semibold bg-[#0F2A4A] text-white hover:bg-[#163c68] transition-colors cursor-pointer"
                     >
@@ -525,6 +553,65 @@ export const StudentQuizzesPage: React.FC = () => {
                     <strong>Single Attempt Policy:</strong> Once you submit this test, your submission is final. Retakes are strictly prohibited.
                   </span>
                 </div>
+
+                {/* Submission Status Trackers */}
+                {submissionStatus === 'loading' && (
+                  <div className="p-4 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-xl flex items-center justify-between gap-3 animate-pulse">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-blue-100 dark:bg-blue-900/60 rounded-lg text-blue-700 dark:text-blue-300">
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-blue-900 dark:text-blue-100">
+                          Submitting & Scoring Assessment...
+                        </h4>
+                        <p className="text-[11px] text-blue-700 dark:text-blue-300 mt-0.5">
+                          Securely verifying answers with server API and computing Pass 1 auto-grade marks.
+                        </p>
+                      </div>
+                    </div>
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-200 dark:bg-blue-800 text-blue-800 dark:text-blue-200 uppercase tracking-wider">
+                      Status: Submitting
+                    </span>
+                  </div>
+                )}
+
+                {submissionStatus === 'error' && submissionError && (
+                  <div className="p-4 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <div className="p-2 bg-rose-100 dark:bg-rose-900/60 rounded-lg text-rose-700 dark:text-rose-300 shrink-0">
+                        <AlertTriangle className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-rose-900 dark:text-rose-100 flex items-center gap-2">
+                          <span>API Submission Failed</span>
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-200 dark:bg-rose-800 text-rose-800 dark:text-rose-200">
+                            Status: Error
+                          </span>
+                        </h4>
+                        <p className="text-[11px] text-rose-700 dark:text-rose-300 mt-0.5 leading-relaxed">
+                          {submissionError}. Your answers remain safely preserved.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setSubmissionError(null)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                      >
+                        Dismiss
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSubmitQuiz()}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white shadow-2xs transition-colors cursor-pointer"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" /> Try Submitting Again
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Questions Grouped by Section */}
                 <div className="space-y-8">
@@ -662,28 +749,69 @@ export const StudentQuizzesPage: React.FC = () => {
                   })}
                 </div>
 
-                {/* Submit Controls */}
-                <div className="flex items-center justify-between pt-4 border-t border-slate-100">
-                  <span className="text-xs text-slate-500">
-                    Questions Answered:{' '}
-                    <strong>
-                      {Object.keys(studentAnswers).length} / {activeQuiz.questions.length}
-                    </strong>
-                  </span>
+                {/* Submit Controls with live Submission Status Indicator */}
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-slate-100">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-slate-500">
+                      Questions Answered:{' '}
+                      <strong className="text-slate-800 dark:text-slate-200">
+                        {Object.keys(studentAnswers).length} / {activeQuiz.questions.length}
+                      </strong>
+                    </span>
 
-                  <div className="flex gap-2">
+                    {/* Live status badges */}
+                    {submissionStatus === 'loading' && (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200 border border-blue-200 dark:border-blue-800">
+                        <Loader2 className="w-3 h-3 animate-spin text-blue-600" /> Scoring & saving...
+                      </span>
+                    )}
+                    {submissionStatus === 'error' && (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-100 dark:bg-rose-900/50 text-rose-800 dark:text-rose-200 border border-rose-200 dark:border-rose-800">
+                        <AlertTriangle className="w-3 h-3 text-rose-600" /> Error occurred
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
                     <button
                       type="button"
-                      onClick={() => setActiveQuiz(null)}
-                      className="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                      disabled={submissionStatus === 'loading'}
+                      onClick={() => {
+                        setActiveQuiz(null);
+                        setSubmissionStatus('idle');
+                        setSubmissionError(null);
+                      }}
+                      className="px-4 py-2.5 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
-                      className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-xs font-semibold bg-[#0F2A4A] hover:bg-[#163c68] text-white shadow-xs"
+                      disabled={submissionStatus === 'loading'}
+                      className={`inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-xs font-semibold shadow-xs transition-all cursor-pointer ${
+                        submissionStatus === 'loading'
+                          ? 'bg-blue-600 text-white opacity-85 cursor-wait'
+                          : submissionStatus === 'error'
+                          ? 'bg-rose-600 hover:bg-rose-700 text-white'
+                          : 'bg-[#0F2A4A] hover:bg-[#163c68] text-white'
+                      }`}
                     >
-                      <Send className="w-3.5 h-3.5" /> Submit Assessment
+                      {submissionStatus === 'loading' ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Submitting Assessment...</span>
+                        </>
+                      ) : submissionStatus === 'error' ? (
+                        <>
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Retry Submission</span>
+                        </>
+                      ) : (
+                        <>
+                          <Send className="w-3.5 h-3.5" />
+                          <span>Submit Assessment</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>

@@ -9,6 +9,9 @@ import {
   AppNotification,
   AuditLog,
   SystemSettings,
+  StudentInquiry,
+  InquiryMessage,
+  UserRole,
 } from '@/src/types';
 import {
   INITIAL_USERS,
@@ -21,6 +24,7 @@ import {
   INITIAL_NOTIFICATIONS,
   INITIAL_AUDIT_LOGS,
   INITIAL_SETTINGS,
+  INITIAL_INQUIRIES,
 } from './sampleData';
 import { assertValidQuiz } from './quizValidator';
 
@@ -36,6 +40,7 @@ const STORAGE_KEYS = {
   NOTIFICATION_READS: 'eduform_store_notification_reads',
   AUDIT_LOGS: 'eduform_store_audit_logs',
   SETTINGS: 'eduform_store_settings',
+  INQUIRIES: 'eduform_store_inquiries',
 };
 
 function getStoredOrInit<T>(key: string, initialData: T): T {
@@ -72,6 +77,7 @@ class DataStore {
     saveStore(STORAGE_KEYS.NOTIFICATIONS, INITIAL_NOTIFICATIONS);
     saveStore(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
     saveStore(STORAGE_KEYS.SETTINGS, INITIAL_SETTINGS);
+    saveStore(STORAGE_KEYS.INQUIRIES, INITIAL_INQUIRIES);
   }
 
   // --- Users ---
@@ -319,8 +325,30 @@ class DataStore {
 
   // --- Quizzes ---
   public getQuizzes(): Quiz[] {
-    const quizzes = getStoredOrInit<Quiz[]>(STORAGE_KEYS.QUIZZES, INITIAL_QUIZZES);
+    const rawQuizzes = getStoredOrInit<Quiz[]>(STORAGE_KEYS.QUIZZES, INITIAL_QUIZZES);
     let modified = false;
+    const quizzes = rawQuizzes.map((q) => {
+      const needsMigration =
+        q.startDate === undefined ||
+        q.endDate === undefined ||
+        q.settings?.startDate === undefined ||
+        q.settings?.endDate === undefined;
+      if (needsMigration) {
+        modified = true;
+        return {
+          ...q,
+          startDate: q.startDate ?? null,
+          endDate: q.endDate ?? null,
+          settings: {
+            ...q.settings,
+            startDate: q.settings?.startDate ?? null,
+            endDate: q.settings?.endDate ?? null,
+          },
+        };
+      }
+      return q;
+    });
+
     for (const initQ of INITIAL_QUIZZES) {
       if (!quizzes.some((q) => q.id === initQ.id)) {
         quizzes.push(initQ);
@@ -342,7 +370,14 @@ class DataStore {
     const validation = assertValidQuiz(quiz);
     const normalizedQuiz: Quiz = {
       ...quiz,
+      startDate: quiz.startDate ?? null,
+      endDate: quiz.endDate ?? null,
       totalMarks: validation.totalMarks,
+      settings: {
+        ...quiz.settings,
+        startDate: quiz.settings?.startDate ?? null,
+        endDate: quiz.settings?.endDate ?? null,
+      },
     };
     const quizzes = this.getQuizzes();
     const idx = quizzes.findIndex((q) => q.id === normalizedQuiz.id);
@@ -355,9 +390,10 @@ class DataStore {
 
     // Sync to Firestore if online / enabled
     try {
-      import('@/src/lib/firebase').then(({ db }) => {
+      import('@/src/lib/firebase').then(({ db, sanitizeForFirestore }) => {
         import('firebase/firestore').then(({ doc, setDoc }) => {
-          setDoc(doc(db, 'quizzes', normalizedQuiz.id), normalizedQuiz).catch((err) => {
+          const payload = sanitizeForFirestore(normalizedQuiz);
+          setDoc(doc(db, 'quizzes', normalizedQuiz.id), payload).catch((err) => {
             console.warn('Firestore quiz sync deferred/offline:', err);
           });
         });
@@ -423,9 +459,10 @@ class DataStore {
 
     // Sync to Firestore if online / enabled
     try {
-      import('@/src/lib/firebase').then(({ db }) => {
+      import('@/src/lib/firebase').then(({ db, sanitizeForFirestore }) => {
         import('firebase/firestore').then(({ doc, setDoc }) => {
-          setDoc(doc(db, 'submissions', submission.id), submission).catch((err) => {
+          const payload = sanitizeForFirestore(submission);
+          setDoc(doc(db, 'submissions', submission.id), payload).catch((err) => {
             console.warn('Firestore submission sync deferred/offline:', err);
           });
         });
@@ -435,6 +472,59 @@ class DataStore {
     }
 
     return true;
+  }
+
+  /**
+   * Asynchronous assessment submission API
+   * Handles network latency, verification, duplicate prevention, and Firestore persistence.
+   */
+  public async submitAssessmentApi(
+    submission: Submission
+  ): Promise<{ success: boolean; data?: Submission; error?: string }> {
+    // Simulate real network flight
+    await new Promise((res) => setTimeout(res, 750));
+
+    // Validate payload
+    if (!submission.quizId || !submission.userId) {
+      return {
+        success: false,
+        error: 'Invalid submission payload: Missing quiz or student identity.',
+      };
+    }
+
+    // Strict single attempt verification
+    const subs = this.getSubmissions();
+    const alreadySubmitted = subs.some(
+      (s) => s.userId === submission.userId && s.quizId === submission.quizId && s.id !== submission.id
+    );
+    if (alreadySubmitted) {
+      return {
+        success: false,
+        error:
+          'Assessment has already been submitted. Retakes are strictly prohibited by institutional policy.',
+      };
+    }
+
+    // Save submission locally
+    const saved = this.saveSubmission(submission);
+    if (!saved) {
+      return {
+        success: false,
+        error: 'Submission rejected: Duplicate attempt detected.',
+      };
+    }
+
+    // Remote persistence attempt
+    try {
+      const { db, sanitizeForFirestore } = await import('@/src/lib/firebase');
+      const { doc, setDoc } = await import('firebase/firestore');
+      const payload = sanitizeForFirestore(submission);
+      await setDoc(doc(db, 'submissions', submission.id), payload);
+    } catch (e) {
+      console.warn('Firestore remote sync deferred, persisted locally:', e);
+    }
+
+    return { success: true, data: submission };
   }
 
   // --- Notifications ---
@@ -553,6 +643,220 @@ class DataStore {
       if (settings.appName) {
         document.title = `${settings.appName} | ${settings.tagline || 'School Assessment System'}`;
       }
+    }
+  }
+
+  // --- Student Inquiries & Teacher Q&A ---
+  public getInquiries(): StudentInquiry[] {
+    const inquiries = getStoredOrInit<StudentInquiry[]>(STORAGE_KEYS.INQUIRIES, INITIAL_INQUIRIES);
+    let modified = false;
+    for (const initInq of INITIAL_INQUIRIES) {
+      if (!inquiries.some((i) => i.id === initInq.id)) {
+        inquiries.push(initInq);
+        modified = true;
+      }
+    }
+    if (modified) {
+      saveStore(STORAGE_KEYS.INQUIRIES, inquiries);
+    }
+    return inquiries;
+  }
+
+  public getInquiryById(id: string): StudentInquiry | undefined {
+    return this.getInquiries().find((i) => i.id === id);
+  }
+
+  public getInquiriesByStudent(studentId: string): StudentInquiry[] {
+    return this.getInquiries().filter((i) => i.studentId === studentId);
+  }
+
+  public isTeacherAssignedToInquiry(
+    inquiry: StudentInquiry,
+    profile: UserProfile | null | undefined
+  ): boolean {
+    if (!profile) return false;
+    // Admins have oversight across all inquiries
+    if (profile.role === 'admin') return true;
+
+    // 1. Direct teacher assignment match
+    if (inquiry.teacherId && inquiry.teacherId === profile.uid) {
+      return true;
+    }
+
+    // 2. If explicitly assigned to a different teacher, this teacher does not own it
+    if (inquiry.teacherId && inquiry.teacherId !== profile.uid) {
+      return false;
+    }
+
+    // 3. Fallback for unassigned inquiries: must match BOTH class AND subject
+    const matchesClass = Boolean(profile.classIds?.includes(inquiry.classId));
+    const matchesSubject = Boolean(profile.subjectIds?.includes(inquiry.subjectId));
+    return matchesClass && matchesSubject;
+  }
+
+  public getInquiriesByTeacher(
+    teacherId: string,
+    classIds?: string[],
+    subjectIds?: string[]
+  ): StudentInquiry[] {
+    return this.getInquiries().filter((i) => {
+      if (i.teacherId === teacherId) return true;
+      if (i.teacherId && i.teacherId !== teacherId) return false;
+      const matchClass = !classIds || classIds.length === 0 || classIds.includes(i.classId);
+      const matchSubject = !subjectIds || subjectIds.length === 0 || subjectIds.includes(i.subjectId);
+      return matchClass && matchSubject;
+    });
+  }
+
+  public getTeachersForClassSubject(classId: string, subjectId: string): UserProfile[] {
+    const allUsers = this.getUsers();
+    // 1. Teachers assigned to this class and subject
+    const exactMatches = allUsers.filter(
+      (u) =>
+        u.role === 'teacher' &&
+        u.status === 'active' &&
+        u.classIds?.includes(classId) &&
+        u.subjectIds?.includes(subjectId)
+    );
+    if (exactMatches.length > 0) return exactMatches;
+
+    // 2. Teachers teaching this subject across any class
+    const subjectTeachers = allUsers.filter(
+      (u) =>
+        u.role === 'teacher' &&
+        u.status === 'active' &&
+        u.subjectIds?.includes(subjectId)
+    );
+    if (subjectTeachers.length > 0) return subjectTeachers;
+
+    // 3. Teachers assigned to this class
+    const classTeachers = allUsers.filter(
+      (u) =>
+        u.role === 'teacher' &&
+        u.status === 'active' &&
+        u.classIds?.includes(classId)
+    );
+    if (classTeachers.length > 0) return classTeachers;
+
+    // 4. Fallback to active teachers or admin lead
+    const anyStaff = allUsers.filter(
+      (u) => (u.role === 'teacher' || u.role === 'admin') && u.status === 'active'
+    );
+    return anyStaff;
+  }
+
+  public getTeacherForClassSubject(classId: string, subjectId: string): UserProfile | undefined {
+    const teachers = this.getTeachersForClassSubject(classId, subjectId);
+    return teachers[0];
+  }
+
+  public saveInquiry(inquiry: StudentInquiry): void {
+    const inquiries = this.getInquiries();
+    const idx = inquiries.findIndex((i) => i.id === inquiry.id);
+    if (idx >= 0) {
+      inquiries[idx] = inquiry;
+    } else {
+      inquiries.unshift(inquiry);
+    }
+    saveStore(STORAGE_KEYS.INQUIRIES, inquiries);
+
+    // Dispatch update event for reactive components
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('eduform_inquiries_updated', { detail: inquiry }));
+    }
+
+    // Sync to Firestore if online
+    try {
+      import('@/src/lib/firebase').then(({ db, sanitizeForFirestore }) => {
+        import('firebase/firestore').then(({ doc, setDoc }) => {
+          const payload = sanitizeForFirestore(inquiry);
+          setDoc(doc(db, 'inquiries', inquiry.id), payload).catch((err) => {
+            console.warn('Firestore inquiry sync deferred/offline:', err);
+          });
+        });
+      });
+    } catch {
+      // safe fallback
+    }
+  }
+
+  public addInquiryReply(
+    inquiryId: string,
+    reply: { authorId: string; authorName: string; authorRole: UserRole; content: string }
+  ): StudentInquiry | undefined {
+    const inquiry = this.getInquiryById(inquiryId);
+    if (!inquiry) return undefined;
+
+    const newMsg: InquiryMessage = {
+      id: `msg-${Date.now()}`,
+      authorId: reply.authorId,
+      authorName: reply.authorName,
+      authorRole: reply.authorRole,
+      content: reply.content.trim(),
+      createdAt: new Date().toISOString(),
+    };
+
+    const isTeacherReply = reply.authorRole === 'teacher' || reply.authorRole === 'admin';
+    const updated: StudentInquiry = {
+      ...inquiry,
+      status: isTeacherReply ? 'answered' : inquiry.status,
+      updatedAt: new Date().toISOString(),
+      messages: [...inquiry.messages, newMsg],
+    };
+
+    this.saveInquiry(updated);
+
+    // If teacher replied, trigger in-app notification to student
+    if (isTeacherReply) {
+      const notif: AppNotification = {
+        id: `notif-reply-${Date.now()}`,
+        title: `${reply.authorName} answered your question`,
+        bodyHtml: `<p><strong>${reply.authorName}</strong> responded to your question on <strong>${inquiry.subjectName}</strong>: "<em>${inquiry.title}</em>"</p>`,
+        priority: 'high',
+        audience: {
+          type: 'user',
+          ids: [inquiry.studentId],
+        },
+        createdBy: reply.authorId,
+        createdAt: new Date().toISOString(),
+        expiresAt: null,
+        status: 'published',
+      };
+      this.saveNotification(notif);
+    }
+
+    return updated;
+  }
+
+  public resolveInquiry(inquiryId: string): void {
+    const inquiry = this.getInquiryById(inquiryId);
+    if (!inquiry) return;
+    const updated: StudentInquiry = {
+      ...inquiry,
+      status: 'resolved',
+      resolvedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    this.saveInquiry(updated);
+  }
+
+  public reopenInquiry(inquiryId: string): void {
+    const inquiry = this.getInquiryById(inquiryId);
+    if (!inquiry) return;
+    const updated: StudentInquiry = {
+      ...inquiry,
+      status: 'pending',
+      resolvedAt: undefined,
+      updatedAt: new Date().toISOString(),
+    };
+    this.saveInquiry(updated);
+  }
+
+  public deleteInquiry(id: string): void {
+    const inquiries = this.getInquiries().filter((i) => i.id !== id);
+    saveStore(STORAGE_KEYS.INQUIRIES, inquiries);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('eduform_inquiries_updated'));
     }
   }
 }

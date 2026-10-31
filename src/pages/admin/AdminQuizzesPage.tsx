@@ -393,16 +393,18 @@ export const AdminQuizzesPage: React.FC = () => {
       ...targetQuiz,
       status: newStatus,
       isActive: isCurrentlyClosed,
+      startDate: targetQuiz.startDate ?? null,
       endDate:
         isCurrentlyClosed && targetQuiz.endDate && new Date(targetQuiz.endDate).getTime() < Date.now()
           ? extendedDeadline
-          : targetQuiz.endDate,
+          : targetQuiz.endDate ?? null,
       settings: {
         ...targetQuiz.settings,
+        startDate: targetQuiz.settings?.startDate ?? null,
         endDate:
-          isCurrentlyClosed && targetQuiz.settings.endDate && new Date(targetQuiz.settings.endDate).getTime() < Date.now()
+          isCurrentlyClosed && targetQuiz.settings?.endDate && new Date(targetQuiz.settings.endDate).getTime() < Date.now()
             ? extendedDeadline
-            : targetQuiz.settings.endDate,
+            : targetQuiz.settings?.endDate ?? null,
       },
     };
 

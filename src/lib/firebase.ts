@@ -94,3 +94,30 @@ export function handleFirestoreError(
   console.error('Firestore Error:', JSON.stringify(errInfo, null, 2));
   throw new Error(JSON.stringify(errInfo));
 }
+
+/**
+ * Recursively removes unsupported `undefined` field values from objects and arrays,
+ * preventing FirebaseError: Function setDoc() called with invalid data. Unsupported field value: undefined.
+ */
+export function sanitizeForFirestore<T>(data: T): T {
+  if (data === undefined) {
+    return null as unknown as T;
+  }
+  if (data === null || typeof data !== 'object') {
+    return data;
+  }
+  if (data instanceof Date) {
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return data.map((item) => (item === undefined ? null : sanitizeForFirestore(item))) as unknown as T;
+  }
+  const cleaned: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(data as Record<string, unknown>)) {
+    if (val !== undefined) {
+      cleaned[key] = sanitizeForFirestore(val);
+    }
+  }
+  return cleaned as T;
+}
+
