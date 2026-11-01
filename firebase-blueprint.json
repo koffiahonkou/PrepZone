@@ -217,16 +217,39 @@
         "title": { "type": "string", "maxLength": 200 },
         "question": { "type": "string" },
         "priority": { "type": "string", "enum": ["normal", "urgent"] },
-        "status": { "type": "string", "enum": ["pending", "answered", "resolved"] },
+        "status": { "type": "string", "enum": ["pending", "answered", "resolved", "archived"] },
         "messages": { "type": "array" },
         "createdAt": { "type": "string" },
         "updatedAt": { "type": "string" },
-        "resolvedAt": { "type": "string" }
+        "resolvedAt": { "type": "string" },
+        "archivedAt": { "type": "string" }
       },
       "required": ["id", "studentId", "classId", "subjectId", "teacherId", "title", "question", "status", "messages", "createdAt"]
+    },
+    "CannedResponse": {
+      "title": "CannedResponse",
+      "description": "Pre-authored or custom teacher response templates for student inquiries",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string", "maxLength": 100 },
+        "category": { "type": "string" },
+        "categoryLabel": { "type": "string" },
+        "content": { "type": "string" },
+        "tags": { "type": "array" },
+        "subjectId": { "type": "string" },
+        "isCustom": { "type": "boolean" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "title", "category", "content"]
     }
   },
   "firestore": {
+    "/cannedResponses/{responseId}": {
+      "schema": { "$ref": "#/entities/CannedResponse" },
+      "description": "Library of reusable canned responses for teacher replies"
+    },
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/User" },
       "description": "User profiles and RBAC role data"

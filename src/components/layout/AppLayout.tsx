@@ -117,7 +117,11 @@ export const AppLayout: React.FC = () => {
       setInquiries(dataStore.getInquiries());
     };
     window.addEventListener('eduform_inquiries_updated', handleInqUpdate);
-    return () => window.removeEventListener('eduform_inquiries_updated', handleInqUpdate);
+    window.addEventListener('eduform_inquiry_reads_updated', handleInqUpdate);
+    return () => {
+      window.removeEventListener('eduform_inquiries_updated', handleInqUpdate);
+      window.removeEventListener('eduform_inquiry_reads_updated', handleInqUpdate);
+    };
   }, []);
 
   // Compute pending questions for teacher or admin

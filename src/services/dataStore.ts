@@ -12,6 +12,7 @@ import {
   StudentInquiry,
   InquiryMessage,
   UserRole,
+  CannedResponse,
 } from '@/src/types';
 import {
   INITIAL_USERS,
@@ -25,6 +26,7 @@ import {
   INITIAL_AUDIT_LOGS,
   INITIAL_SETTINGS,
   INITIAL_INQUIRIES,
+  INITIAL_CANNED_RESPONSES,
 } from './sampleData';
 import { assertValidQuiz } from './quizValidator';
 
@@ -41,6 +43,8 @@ const STORAGE_KEYS = {
   AUDIT_LOGS: 'eduform_store_audit_logs',
   SETTINGS: 'eduform_store_settings',
   INQUIRIES: 'eduform_store_inquiries',
+  INQUIRY_READS: 'eduform_store_inquiry_reads',
+  CANNED_RESPONSES: 'eduform_store_canned_responses',
 };
 
 function getStoredOrInit<T>(key: string, initialData: T): T {
@@ -78,6 +82,8 @@ class DataStore {
     saveStore(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
     saveStore(STORAGE_KEYS.SETTINGS, INITIAL_SETTINGS);
     saveStore(STORAGE_KEYS.INQUIRIES, INITIAL_INQUIRIES);
+    saveStore(STORAGE_KEYS.CANNED_RESPONSES, INITIAL_CANNED_RESPONSES);
+    saveStore(STORAGE_KEYS.INQUIRY_READS, {});
   }
 
   // --- Users ---
@@ -828,13 +834,46 @@ class DataStore {
     return updated;
   }
 
-  public resolveInquiry(inquiryId: string): void {
+  public resolveInquiry(inquiryId: string, actorId?: string): void {
     const inquiry = this.getInquiryById(inquiryId);
     if (!inquiry) return;
     const updated: StudentInquiry = {
       ...inquiry,
       status: 'resolved',
       resolvedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    this.saveInquiry(updated);
+    if (actorId) {
+      this.markInquiryRead(inquiryId, actorId);
+    }
+  }
+
+  public archiveInquiry(inquiryId: string, actorId?: string): void {
+    const inquiry = this.getInquiryById(inquiryId);
+    if (!inquiry) return;
+    const updated: StudentInquiry = {
+      ...inquiry,
+      status: 'archived',
+      archivedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    this.saveInquiry(updated);
+    if (actorId) {
+      this.markInquiryRead(inquiryId, actorId);
+    }
+  }
+
+  public unarchiveInquiry(inquiryId: string): void {
+    const inquiry = this.getInquiryById(inquiryId);
+    if (!inquiry) return;
+    const hasReplies = inquiry.messages.some(
+      (m) => m.authorRole === 'teacher' || m.authorRole === 'admin'
+    );
+    const updated: StudentInquiry = {
+      ...inquiry,
+      status: hasReplies ? 'answered' : 'pending',
+      archivedAt: null,
       updatedAt: new Date().toISOString(),
     };
     this.saveInquiry(updated);
@@ -846,7 +885,8 @@ class DataStore {
     const updated: StudentInquiry = {
       ...inquiry,
       status: 'pending',
-      resolvedAt: undefined,
+      resolvedAt: null,
+      archivedAt: null,
       updatedAt: new Date().toISOString(),
     };
     this.saveInquiry(updated);
@@ -858,6 +898,130 @@ class DataStore {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('eduform_inquiries_updated'));
     }
+  }
+
+  // --- Inquiry Read Receipts & State ---
+  public getInquiryReads(userId: string): string[] {
+    const all = getStoredOrInit<Record<string, string[]>>(STORAGE_KEYS.INQUIRY_READS, {});
+    return all[userId] || [];
+  }
+
+  public markInquiryRead(inquiryId: string, userId: string): void {
+    if (!userId || !inquiryId) return;
+    const all = getStoredOrInit<Record<string, string[]>>(STORAGE_KEYS.INQUIRY_READS, {});
+    const userReads = new Set(all[userId] || []);
+    if (!userReads.has(inquiryId)) {
+      userReads.add(inquiryId);
+      all[userId] = Array.from(userReads);
+      saveStore(STORAGE_KEYS.INQUIRY_READS, all);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('eduform_inquiry_reads_updated', { detail: { userId, inquiryId } })
+        );
+      }
+    }
+  }
+
+  public isInquiryRead(inquiryId: string, userId?: string): boolean {
+    if (!userId) return true;
+    const reads = this.getInquiryReads(userId);
+    return reads.includes(inquiryId);
+  }
+
+  // Active inquiries = inquiries assigned to teacher that are pending or answered (excluding resolved & archived)
+  public getActiveInquiries(profile: UserProfile | null | undefined): StudentInquiry[] {
+    if (!profile) return [];
+    return this.getInquiries().filter(
+      (inq) =>
+        (inq.status === 'pending' || inq.status === 'answered') &&
+        this.isTeacherAssignedToInquiry(inq, profile)
+    );
+  }
+
+  // Pending inquiries = inquiries strictly awaiting teacher reply
+  public getPendingInquiries(profile: UserProfile | null | undefined): StudentInquiry[] {
+    if (!profile) return [];
+    return this.getInquiries().filter(
+      (inq) => inq.status === 'pending' && this.isTeacherAssignedToInquiry(inq, profile)
+    );
+  }
+
+  // Unread inquiries = pending inquiries not yet marked read by this teacher
+  public getUnreadInquiries(profile: UserProfile | null | undefined): StudentInquiry[] {
+    if (!profile) return [];
+    return this.getInquiries().filter(
+      (inq) =>
+        inq.status === 'pending' &&
+        this.isTeacherAssignedToInquiry(inq, profile) &&
+        !this.isInquiryRead(inq.id, profile.uid)
+    );
+  }
+
+  // --- Canned Responses Library ---
+  public getCannedResponses(): CannedResponse[] {
+    const stored = getStoredOrInit<CannedResponse[]>(
+      STORAGE_KEYS.CANNED_RESPONSES,
+      INITIAL_CANNED_RESPONSES
+    );
+    let modified = false;
+    for (const initCanned of INITIAL_CANNED_RESPONSES) {
+      if (!stored.some((c) => c.id === initCanned.id)) {
+        stored.push(initCanned);
+        modified = true;
+      }
+    }
+    if (modified) {
+      saveStore(STORAGE_KEYS.CANNED_RESPONSES, stored);
+    }
+    return stored;
+  }
+
+  public saveCannedResponse(canned: CannedResponse): void {
+    const list = this.getCannedResponses();
+    const idx = list.findIndex((c) => c.id === canned.id);
+    if (idx >= 0) {
+      list[idx] = canned;
+    } else {
+      list.unshift(canned);
+    }
+    saveStore(STORAGE_KEYS.CANNED_RESPONSES, list);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('eduform_canned_responses_updated', { detail: canned })
+      );
+    }
+  }
+
+  public deleteCannedResponse(id: string): void {
+    const list = this.getCannedResponses().filter((c) => c.id !== id);
+    saveStore(STORAGE_KEYS.CANNED_RESPONSES, list);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('eduform_canned_responses_updated', { detail: { id } })
+      );
+    }
+  }
+
+  public interpolateCannedResponse(
+    content: string,
+    vars: {
+      studentName?: string;
+      teacherName?: string;
+      subjectName?: string;
+      className?: string;
+    }
+  ): string {
+    const sName = vars.studentName ? vars.studentName.split(' ')[0] : 'Student';
+    const tName = vars.teacherName || 'Teacher';
+    const subj = vars.subjectName || 'the subject';
+    const cls = vars.className || 'your class';
+
+    return content
+      .replace(/{student_name}/gi, sName)
+      .replace(/{name}/gi, sName)
+      .replace(/{teacher_name}/gi, tName)
+      .replace(/{subject_name}/gi, subj)
+      .replace(/{class_name}/gi, cls);
   }
 }
 

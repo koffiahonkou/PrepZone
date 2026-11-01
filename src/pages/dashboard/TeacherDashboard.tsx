@@ -44,15 +44,42 @@ export const TeacherDashboard: React.FC = () => {
   const users = useMemo(() => dataStore.getUsers(), []);
 
   const [inquiries, setInquiries] = useState<StudentInquiry[]>(() => dataStore.getInquiries());
+  const [inquiryReadsTrigger, setInquiryReadsTrigger] = useState(0);
+
   useEffect(() => {
     const handleInq = () => setInquiries(dataStore.getInquiries());
+    const handleReads = () => setInquiryReadsTrigger((v) => v + 1);
     window.addEventListener('eduform_inquiries_updated', handleInq);
-    return () => window.removeEventListener('eduform_inquiries_updated', handleInq);
+    window.addEventListener('eduform_inquiry_reads_updated', handleReads);
+    return () => {
+      window.removeEventListener('eduform_inquiries_updated', handleInq);
+      window.removeEventListener('eduform_inquiry_reads_updated', handleReads);
+    };
   }, []);
 
+  // Strict pending questions awaiting teacher reply
   const pendingInquiries = useMemo(() => {
     return inquiries.filter(
       (inq) => inq.status === 'pending' && dataStore.isTeacherAssignedToInquiry(inq, profile)
+    );
+  }, [inquiries, profile]);
+
+  // Unread questions (pending and not yet opened/read)
+  const unreadInquiries = useMemo(() => {
+    return inquiries.filter(
+      (inq) =>
+        inq.status === 'pending' &&
+        dataStore.isTeacherAssignedToInquiry(inq, profile) &&
+        !dataStore.isInquiryRead(inq.id, profile?.uid)
+    );
+  }, [inquiries, profile, inquiryReadsTrigger]);
+
+  // Active ongoing inquiries (not resolved and not archived)
+  const activeInquiries = useMemo(() => {
+    return inquiries.filter(
+      (inq) =>
+        (inq.status === 'pending' || inq.status === 'answered') &&
+        dataStore.isTeacherAssignedToInquiry(inq, profile)
     );
   }, [inquiries, profile]);
 
@@ -180,6 +207,19 @@ export const TeacherDashboard: React.FC = () => {
               <strong className={pendingInquiries.length > 0 ? "text-amber-300 font-bold" : "text-white"}>
                 {pendingInquiries.length}
               </strong>
+            </div>
+            <div className="flex justify-between items-center text-slate-200">
+              <span>Active Inquiries:</span>
+              <div className="flex items-center gap-1.5">
+                <strong className={activeInquiries.length > 0 ? "text-white font-bold" : "text-slate-400"}>
+                  {activeInquiries.length}
+                </strong>
+                {unreadInquiries.length > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-amber-400 text-slate-950">
+                    {unreadInquiries.length} unread
+                  </span>
+                )}
+              </div>
             </div>
             <div className="flex justify-between items-center text-slate-200">
               <span>Awaiting Theory Marks:</span>

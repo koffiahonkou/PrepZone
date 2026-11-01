@@ -228,7 +228,7 @@ export interface SystemSettings {
   updatedAt?: string;
 }
 
-export type InquiryStatus = 'pending' | 'answered' | 'resolved';
+export type InquiryStatus = 'pending' | 'answered' | 'resolved' | 'archived';
 
 export interface InquiryMessage {
   id: string;
@@ -259,5 +259,28 @@ export interface StudentInquiry {
   createdAt: string;
   updatedAt: string;
   resolvedAt?: string | null;
+  archivedAt?: string | null;
+}
+
+export type CannedResponseCategory =
+  | 'explanations'
+  | 'worked_solutions'
+  | 'lesson_reference'
+  | 'encouragement'
+  | 'clarification'
+  | 'office_hours'
+  | 'custom';
+
+export interface CannedResponse {
+  id: string;
+  title: string;
+  category: CannedResponseCategory;
+  categoryLabel: string;
+  content: string;
+  tags?: string[];
+  subjectId?: string; // Optional: subject-specific or general
+  isCustom?: boolean;
+  createdBy?: string;
+  createdAt?: string;
 }
 

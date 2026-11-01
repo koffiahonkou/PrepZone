@@ -136,6 +136,13 @@ service cloud.firestore {
       );
     }
 
+    // CANNED RESPONSES LIBRARY
+    // Readable by all signed in users, writable by staff and admins
+    match /cannedResponses/{responseId} {
+      allow read: if isSignedIn();
+      allow write: if isStaff();
+    }
+
     // NOTIFICATIONS
     // Writable by staff and admins. Readable by all signed-in users.
     match /notifications/{notificationId} {
