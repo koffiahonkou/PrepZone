@@ -54,6 +54,32 @@ export const AdminUsersPage: React.FC = () => {
   // Delete State
   const [deleteTarget, setDeleteTarget] = useState<UserProfile | null>(null);
 
+  // Quick Reset Password State
+  const [resetTargetUser, setResetTargetUser] = useState<UserProfile | null>(null);
+  const [adminNewPassword, setAdminNewPassword] = useState('Eduform123!');
+  const [showAdminResetPw, setShowAdminResetPw] = useState(false);
+
+  const handleAdminResetPassword = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetTargetUser) return;
+    if (!adminNewPassword || adminNewPassword.trim().length < 6) {
+      toast.error('Password must be at least 6 characters long.');
+      return;
+    }
+    const cleanPw = adminNewPassword.trim();
+    const res = dataStore.resetUserPassword(resetTargetUser.username, cleanPw, 'admin');
+    if (!res.success) {
+      toast.error(res.error || 'Failed to reset password.');
+      return;
+    }
+    setUsers(dataStore.getUsers());
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(cleanPw);
+    }
+    toast.success(`Password for @${resetTargetUser.username} reset to "${cleanPw}" (copied to clipboard).`);
+    setResetTargetUser(null);
+  };
+
   const getLevelName = (levelId: string) => {
     const fallbackMap: Record<string, string> = {
       'level-basic': 'Basic School',
@@ -504,6 +530,18 @@ export const AdminUsersPage: React.FC = () => {
                           </button>
                           <button
                             type="button"
+                            onClick={() => {
+                              setResetTargetUser(u);
+                              setAdminNewPassword('Eduform123!');
+                              setShowAdminResetPw(false);
+                            }}
+                            className="p-1.5 rounded text-amber-600 hover:text-amber-800 hover:bg-amber-50 transition-colors cursor-pointer"
+                            title="Reset password for this user"
+                          >
+                            <KeyRound className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => openEditModal(u)}
                             className="p-1.5 rounded text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors cursor-pointer"
                             title="Edit user assignments & password"
@@ -845,6 +883,82 @@ export const AdminUsersPage: React.FC = () => {
                 Yes, Remove Account
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Quick Reset Password Modal */}
+      {resetTargetUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-slate-200 animate-in fade-in zoom-in-95">
+            <div className="w-10 h-10 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mb-4">
+              <KeyRound className="w-5 h-5" />
+            </div>
+            <h3 className="text-base font-bold text-[#0F2A4A]">
+              Reset Password for @{resetTargetUser.username}
+            </h3>
+            <p className="mt-1 text-xs text-slate-500">
+              Account: <strong className="text-slate-800">{resetTargetUser.fullName}</strong> ({resetTargetUser.role})
+            </p>
+
+            <form onSubmit={handleAdminResetPassword} className="mt-4 space-y-3">
+              <div>
+                <label className="block text-xs font-semibold uppercase text-slate-700 mb-1">
+                  New Password
+                </label>
+                <div className="relative">
+                  <input
+                    type={showAdminResetPw ? 'text' : 'password'}
+                    value={adminNewPassword}
+                    onChange={(e) => setAdminNewPassword(e.target.value)}
+                    placeholder="Enter new password"
+                    className="w-full px-3 py-2 pr-10 text-xs rounded-lg border border-slate-300 focus:outline-hidden focus:border-[#0F2A4A] focus:ring-1 focus:ring-slate-300"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAdminResetPw(!showAdminResetPw)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
+                  >
+                    {showAdminResetPw ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between text-[11px] pt-1">
+                <button
+                  type="button"
+                  onClick={() => setAdminNewPassword(`EduForm${Math.floor(1000 + Math.random() * 9000)}!`)}
+                  className="text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer"
+                >
+                  Generate Random
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAdminNewPassword('Eduform123!')}
+                  className="text-slate-500 hover:text-slate-800 cursor-pointer"
+                >
+                  Reset to Default
+                </button>
+              </div>
+
+              <div className="mt-6 pt-3 border-t border-slate-100 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setResetTargetUser(null)}
+                  className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-[#0F2A4A] hover:bg-[#163c68] text-white shadow-xs cursor-pointer"
+                >
+                  <KeyRound className="w-3.5 h-3.5" />
+                  <span>Update & Copy</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

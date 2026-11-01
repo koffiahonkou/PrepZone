@@ -9,11 +9,14 @@ export const AUTH_DOMAIN = 'eduform.local';
 export const firebaseConfig = {
   apiKey: firebaseAppletConfig.apiKey || import.meta.env.VITE_FIREBASE_API_KEY || 'placeholder-api-key',
   authDomain: firebaseAppletConfig.authDomain || import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'eduform-app.firebaseapp.com',
-  projectId: firebaseAppletConfig.projectId || import.meta.env.VITE_FIREBASE_PROJECT_ID || 'eduform-app',
-  firestoreDatabaseId: firebaseAppletConfig.firestoreDatabaseId || '(default)',
-  storageBucket: firebaseAppletConfig.storageBucket || import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'eduform-app.appspot.com',
-  messagingSenderId: firebaseAppletConfig.messagingSenderId || import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '123456789012',
-  appId: firebaseAppletConfig.appId || import.meta.env.VITE_FIREBASE_APP_ID || '1:123456789012:web:abcdef123456',
+  projectId: firebaseAppletConfig.projectId || import.meta.env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0986164683',
+  firestoreDatabaseId:
+    (import.meta.env.VITE_FIREBASE_DATABASE_ID && import.meta.env.VITE_FIREBASE_DATABASE_ID !== '(default)')
+      ? import.meta.env.VITE_FIREBASE_DATABASE_ID
+      : (firebaseAppletConfig.firestoreDatabaseId || 'ai-studio-prepzone-aa3c7d88-f6dc-41ae-a20b-c6ca87ada9f5'),
+  storageBucket: firebaseAppletConfig.storageBucket || import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'gen-lang-client-0986164683.firebasestorage.app',
+  messagingSenderId: firebaseAppletConfig.messagingSenderId || import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '116647386178',
+  appId: firebaseAppletConfig.appId || import.meta.env.VITE_FIREBASE_APP_ID || '1:116647386178:web:411ca7a87424ee9124a1db',
 };
 
 // Primary App

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User as FirebaseUser, onAuthStateChanged, signOut as fbSignOut, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { User as FirebaseUser, onAuthStateChanged, signOut as fbSignOut } from 'firebase/auth';
 import { auth, firebaseConfig } from '@/src/lib/firebase';
 import { UserProfile } from '@/src/types';
 import { loginWithUsername, getUserProfile } from '@/src/services/authService';
@@ -97,8 +97,9 @@ interface AuthContextValue {
   isTeacher: boolean;
   isStudent: boolean;
   signIn: (username: string, password: string) => Promise<void>;
-  signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
+  resetPassword: (identifier: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
   switchDemoUser: (key: 'admin' | 'teacher1' | 'student1' | 'student2' | 'inactive_user') => void;
   isPlaceholderMode: boolean;
 }
@@ -267,42 +268,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signInWithGoogle = async (): Promise<void> => {
+  const resetPassword = async (
+    identifier: string,
+    newPassword: string
+  ): Promise<{ success: boolean; error?: string }> => {
     setLoading(true);
     try {
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      const fbUser = result.user;
-      setUser(fbUser);
-
-      // Fetch or auto-provision profile in Firestore and local state
-      let userProfile = await getUserProfile(fbUser.uid);
-      if (!userProfile) {
-        const isSuper = fbUser.email === 'saltechmultimedia@gmail.com';
-        const role: 'admin' | 'student' = isSuper ? 'admin' : 'student';
-        const username = fbUser.email ? fbUser.email.split('@')[0] : `user_${fbUser.uid.slice(0, 6)}`;
-        userProfile = {
-          uid: fbUser.uid,
-          username,
-          usernameLower: username.toLowerCase(),
-          authEmail: fbUser.email || `${username}@eduform.local`,
-          fullName: fbUser.displayName || 'Google User',
-          role,
-          status: 'active',
-          classIds: ['class-jss1-a'],
-          levelIds: ['level-basic'],
-          subjectIds: ['subj-mth', 'subj-eng', 'subj-sci'],
-          createdBy: 'google-oauth',
-          createdAt: new Date().toISOString(),
-          lastLoginAt: new Date().toISOString(),
-        };
-        dataStore.saveUser(userProfile);
+      const result = dataStore.resetUserPassword(identifier, newPassword, profile?.uid);
+      if (!result.success) {
+        return { success: false, error: result.error };
       }
-      setProfile(userProfile);
-      localStorage.setItem(LOCAL_STORAGE_DEMO_KEY, userProfile.uid);
-    } catch (err: unknown) {
-      console.error('Google Sign-In error:', err);
-      throw err;
+
+      // If resetting currently authenticated user, update local profile state
+      if (profile && (result.user?.uid === profile.uid || result.user?.usernameLower === profile.usernameLower)) {
+        setProfile(result.user);
+      }
+
+      return { success: true };
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const changePassword = async (
+    currentPassword: string,
+    newPassword: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!profile) {
+      return { success: false, error: 'No active user session found.' };
+    }
+    setLoading(true);
+    try {
+      const result = dataStore.changeUserPassword(profile.uid, currentPassword, newPassword);
+      if (!result.success) {
+        return { success: false, error: result.error };
+      }
+      const updatedUser = dataStore.getUserById(profile.uid);
+      if (updatedUser) {
+        setProfile(updatedUser);
+      }
+      return { success: true };
     } finally {
       setLoading(false);
     }
@@ -364,8 +369,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isTeacher,
         isStudent,
         signIn,
-        signInWithGoogle,
         signOut,
+        resetPassword,
+        changePassword,
         switchDemoUser,
         isPlaceholderMode,
       }}

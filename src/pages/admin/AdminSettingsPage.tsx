@@ -26,6 +26,7 @@ import {
   Palette,
   Sun,
   Moon,
+  KeyRound,
 } from 'lucide-react';
 import { dataStore } from '@/src/services/dataStore';
 import { SystemSettings, AuditLog } from '@/src/types';
@@ -1094,6 +1095,16 @@ export const AdminSettingsPage: React.FC = () => {
                 <span className="font-bold text-slate-900 block">Account Deactivation Safeguards</span>
                 <p className="text-slate-500 mt-0.5">
                   When a user account status is set to <code>inactive</code>, any active session is immediately revoked with an alert to contact the school administrator.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-purple-50/50 rounded-xl border border-purple-200 flex items-start gap-3">
+              <KeyRound className="w-5 h-5 text-purple-600 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold text-slate-900 block">Administrator Provisioning & Password Management</span>
+                <p className="text-slate-500 mt-0.5">
+                  Public Gmail / Google login is strictly removed. All accounts are provisioned by the administrator in the User Directory. Users can reset their password on the login screen or via their account profile menu, and administrators maintain instant one-click credential reset authority.
                 </p>
               </div>
             </div>

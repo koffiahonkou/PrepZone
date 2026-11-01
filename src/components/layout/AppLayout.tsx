@@ -22,11 +22,13 @@ import {
   Sun,
   Moon,
   MessageSquareQuote,
+  KeyRound,
 } from 'lucide-react';
 import { useAuth } from '@/src/context/AuthContext';
 import { useColorMode } from '@/src/context/ColorModeContext';
 import { EduFormLogo } from '@/src/components/brand/EduFormLogo';
 import { NotificationBell } from './NotificationBell';
+import { ChangePasswordModal } from '@/src/components/auth/ChangePasswordModal';
 import { dataStore } from '@/src/services/dataStore';
 import { SYSTEM_THEMES, getTheme } from '@/src/lib/themes';
 import { toast } from 'sonner';
@@ -49,6 +51,7 @@ export const AppLayout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [themeDropdownOpen, setThemeDropdownOpen] = useState(false);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const profileDropdownRef = useRef<HTMLDivElement>(null);
   const themeDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -381,6 +384,18 @@ export const AppLayout: React.FC = () => {
                     </span>
                   </button>
 
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProfileDropdownOpen(false);
+                      setIsChangePasswordOpen(true);
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                  >
+                    <KeyRound className="w-4 h-4 text-emerald-600" />
+                    <span>Change Password</span>
+                  </button>
+
                   {isAdmin && (
                     <NavLink
                       to="/admin/settings"
@@ -572,6 +587,12 @@ export const AppLayout: React.FC = () => {
           </div>
         </main>
       </div>
+
+      {/* Change Password Dialog for Active User */}
+      <ChangePasswordModal
+        isOpen={isChangePasswordOpen}
+        onClose={() => setIsChangePasswordOpen(false)}
+      />
     </div>
   );
 };
