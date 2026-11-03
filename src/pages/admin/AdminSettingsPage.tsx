@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Settings,
   Shield,
@@ -29,6 +29,7 @@ import {
   KeyRound,
 } from 'lucide-react';
 import { dataStore } from '@/src/services/dataStore';
+import { uploadAssetFile } from '@/src/services/storageService';
 import { SystemSettings, AuditLog } from '@/src/types';
 import { useAuth } from '@/src/context/AuthContext';
 import { useColorMode } from '@/src/context/ColorModeContext';
@@ -41,6 +42,8 @@ export const AdminSettingsPage: React.FC = () => {
   const { mode, isNight, setMode } = useColorMode();
   const [settings, setSettings] = useState<SystemSettings>(() => dataStore.getSettings());
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => dataStore.getAuditLogs());
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
 
   // System Information Form State
   const [appName, setAppName] = useState(settings.appName || 'EduForm');
@@ -103,7 +106,44 @@ export const AdminSettingsPage: React.FC = () => {
     toast.info(`Live previewing "${themeObj.name}". Click "Activate Theme" to save.`);
   };
 
-  const handleLogoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  useEffect(() => {
+    const handleSettingsUpdate = (e: any) => {
+      if (e.detail) {
+        const s = e.detail as SystemSettings;
+        setSettings(s);
+        setAppName(s.appName || 'EduForm');
+        setTagline(s.tagline || 'School Assessment System');
+        setLogoUrl(s.logoUrl || '');
+        setLogoTheme(s.logoTheme || 'shield');
+        setSelectedThemeId(s.themeId || 'oxford');
+        setSchoolAddress(s.schoolAddress || '');
+        setContactEmail(s.contactEmail || '');
+        setContactPhone(s.contactPhone || '');
+        setSchoolWebsite(s.schoolWebsite || '');
+        setPrincipalOrHead(s.principalOrHead || '');
+        setAcademicTermLabel(s.academicTermLabel || '2026/2027 Term 1');
+        setPassMarkPercent(s.defaultPassMarkPercent ?? 50);
+      }
+    };
+    window.addEventListener('eduform_settings_updated', handleSettingsUpdate);
+    return () => window.removeEventListener('eduform_settings_updated', handleSettingsUpdate);
+  }, []);
+
+  const handleSyncAllToCloud = async () => {
+    try {
+      setIsSyncingCloud(true);
+      toast.loading('Synchronizing all data to Firestore Cloud...', { id: 'cloud-sync' });
+      await dataStore.syncAllLocalDataToFirestore();
+      toast.success('Successfully synchronized all data to Firestore! Vercel deployment will reflect changes instantly.', { id: 'cloud-sync' });
+    } catch (err: any) {
+      console.error('Cloud sync error:', err);
+      toast.error('Failed to sync to cloud: ' + (err?.message || 'Unknown error'), { id: 'cloud-sync' });
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  };
+
+  const handleLogoFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -112,22 +152,34 @@ export const AdminSettingsPage: React.FC = () => {
       return;
     }
 
-    if (file.size > 2 * 1024 * 1024) {
-      toast.error('Logo file size must be less than 2MB.');
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Logo file size must be less than 5MB.');
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setLogoUrl(reader.result);
-        toast.success(`Logo image loaded: ${file.name}`);
-      }
-    };
-    reader.onerror = () => {
-      toast.error('Failed to read logo image file.');
-    };
-    reader.readAsDataURL(file);
+    try {
+      setIsUploadingLogo(true);
+      toast.loading('Uploading logo to cloud storage...', { id: 'logo-upload' });
+      const uploadedUrl = await uploadAssetFile(file, 'branding');
+      setLogoUrl(uploadedUrl);
+
+      // Auto-save settings with new logo so all devices & Vercel get it immediately
+      const current = dataStore.getSettings();
+      const updated: SystemSettings = {
+        ...current,
+        logoUrl: uploadedUrl,
+        updatedAt: new Date().toISOString(),
+      };
+      dataStore.saveSettings(updated);
+      setSettings(updated);
+
+      toast.success(`Logo image uploaded and synchronized across all environments!`, { id: 'logo-upload' });
+    } catch (err: any) {
+      console.error('Logo upload error:', err);
+      toast.error('Failed to upload logo: ' + (err?.message || 'Unknown error'), { id: 'logo-upload' });
+    } finally {
+      setIsUploadingLogo(false);
+    }
   };
 
   const handleClearCustomLogo = () => {
@@ -247,6 +299,15 @@ export const AdminSettingsPage: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             type="button"
+            onClick={handleSyncAllToCloud}
+            disabled={isSyncingCloud}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-xs font-semibold text-emerald-800 shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncingCloud ? 'animate-spin' : ''}`} />
+            {isSyncingCloud ? 'Syncing...' : 'Sync to Cloud (Vercel)'}
+          </button>
+          <button
+            type="button"
             onClick={handleExportData}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 shadow-2xs transition-colors"
           >
@@ -260,6 +321,46 @@ export const AdminSettingsPage: React.FC = () => {
             <RefreshCw className="w-3.5 h-3.5" /> Reset Defaults
           </button>
         </div>
+      </div>
+
+      {/* Cloud & Vercel Real-time Sync Status Banner */}
+      <div className="bg-gradient-to-r from-slate-900 via-[#0F2A4A] to-slate-900 rounded-xl p-4 text-white shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border border-slate-800">
+        <div className="flex items-start gap-3">
+          <div className="p-2.5 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
+            <CheckCircle2 className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-sm font-bold text-white">Firestore Real-time Cloud Synchronization Active</h2>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-400/20 text-emerald-300 border border-emerald-400/30">
+                Connected
+              </span>
+            </div>
+            <p className="text-xs text-slate-300 mt-1">
+              Settings, logo branding, and uploaded materials sync instantaneously with{' '}
+              <a
+                href="https://prepzone-nine.vercel.app"
+                target="_blank"
+                rel="noreferrer"
+                className="text-emerald-300 hover:text-emerald-200 underline font-medium inline-flex items-center gap-1"
+              >
+                prepzone-nine.vercel.app
+                <Globe className="w-3 h-3 inline" />
+              </a>
+              {' '}via Firestore database <span className="font-mono text-emerald-200">ai-studio-prepzone-...</span>
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleSyncAllToCloud}
+          disabled={isSyncingCloud}
+          className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs transition-colors shrink-0 disabled:opacity-50 cursor-pointer"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${isSyncingCloud ? 'animate-spin' : ''}`} />
+          {isSyncingCloud ? 'Synchronizing Cloud...' : 'Push All Local Data to Cloud'}
+        </button>
       </div>
 
       {/* Tabs */}
@@ -448,6 +549,7 @@ export const AdminSettingsPage: React.FC = () => {
                 <input
                   type="file"
                   ref={fileInputRef}
+                  disabled={isUploadingLogo}
                   accept="image/png,image/jpeg,image/svg+xml,image/webp"
                   onChange={handleLogoFileUpload}
                   className="hidden"
@@ -455,16 +557,20 @@ export const AdminSettingsPage: React.FC = () => {
                 />
                 <label
                   htmlFor="logo-file-picker"
-                  className="flex flex-col items-center justify-center cursor-pointer py-4"
+                  className={`flex flex-col items-center justify-center py-4 ${isUploadingLogo ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
                 >
                   <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mb-2 shadow-2xs">
-                    <Upload className="w-6 h-6" />
+                    {isUploadingLogo ? (
+                      <RefreshCw className="w-6 h-6 animate-spin text-emerald-700" />
+                    ) : (
+                      <Upload className="w-6 h-6" />
+                    )}
                   </div>
                   <span className="text-xs font-bold text-slate-800">
-                    Click to select logo file from your device
+                    {isUploadingLogo ? 'Uploading to Firebase Cloud Storage...' : 'Click to select logo file from your device'}
                   </span>
                   <span className="text-[11px] text-slate-400 mt-1">
-                    Supports PNG, JPG, SVG, WebP (Max 2MB). Transparent background recommended.
+                    Supports PNG, JPG, SVG, WebP (Max 5MB). Saved to cloud storage & instantly synced with Vercel.
                   </span>
                 </label>
               </div>

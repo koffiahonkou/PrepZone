@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   BookOpen,
   FileText,
@@ -25,8 +25,10 @@ import {
   Filter,
   Eye,
   Tv,
+  RefreshCw,
 } from 'lucide-react';
 import { dataStore } from '@/src/services/dataStore';
+import { uploadAssetFile } from '@/src/services/storageService';
 import { useAuth } from '@/src/context/AuthContext';
 import { Lesson, LessonAttachment } from '@/src/types';
 import { RichTextEditor } from '@/src/components/common/RichTextEditor';
@@ -109,6 +111,16 @@ export const AdminLessonsPage: React.FC = () => {
 
   // Quick Watch Video Preview Modal
   const [previewVideoLesson, setPreviewVideoLesson] = useState<Lesson | null>(null);
+  const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
+  const [isUploadingVideo, setIsUploadingVideo] = useState(false);
+
+  useEffect(() => {
+    const handleLessonsUpdate = () => {
+      setLessons(dataStore.getLessons());
+    };
+    window.addEventListener('eduform_lessons_updated', handleLessonsUpdate);
+    return () => window.removeEventListener('eduform_lessons_updated', handleLessonsUpdate);
+  }, []);
 
   const getSubjectName = (subjId: string) => {
     return subjects.find((s) => s.id === subjId)?.name || subjId;
@@ -164,7 +176,7 @@ export const AdminLessonsPage: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleVideoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleVideoFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -173,22 +185,23 @@ export const AdminLessonsPage: React.FC = () => {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      setFormVideoUrl(dataUrl);
+    try {
+      setIsUploadingVideo(true);
+      toast.loading(`Uploading video "${file.name}" to cloud storage...`, { id: 'video-upload' });
+      const videoUrl = await uploadAssetFile(file, 'videos');
+      setFormVideoUrl(videoUrl);
       if (!formVideoTitle.trim()) {
         setFormVideoTitle(file.name.replace(/\.[^/.]+$/, ''));
       }
-      toast.success(`Video "${file.name}" (${formatFileSize(file.size)}) uploaded successfully.`);
-    };
-    reader.onerror = () => {
-      toast.error('Failed to read video file.');
-    };
-    reader.readAsDataURL(file);
-
-    if (videoFileInputRef.current) {
-      videoFileInputRef.current.value = '';
+      toast.success(`Video "${file.name}" uploaded successfully!`, { id: 'video-upload' });
+    } catch (err: any) {
+      console.error('Video upload error:', err);
+      toast.error('Failed to upload video: ' + (err?.message || 'Upload error'), { id: 'video-upload' });
+    } finally {
+      setIsUploadingVideo(false);
+      if (videoFileInputRef.current) {
+        videoFileInputRef.current.value = '';
+      }
     }
   };
 
@@ -233,7 +246,7 @@ export const AdminLessonsPage: React.FC = () => {
     toast.success(`Attached template: "${name}"`);
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -244,26 +257,27 @@ export const AdminLessonsPage: React.FC = () => {
     else if (['ppt', 'pptx'].includes(extension)) detectedType = 'slides';
     else if (['png', 'jpg', 'jpeg', 'webp', 'svg'].includes(extension)) detectedType = 'image';
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
+    try {
+      setIsUploadingAttachment(true);
+      toast.loading(`Uploading "${file.name}" to cloud storage...`, { id: 'file-upload' });
+      const fileUrl = await uploadAssetFile(file, 'attachments');
       const att: LessonAttachment = {
         name: file.name,
         type: detectedType,
-        url: dataUrl,
+        url: fileUrl,
         size: formatFileSize(file.size),
-        dataUrl,
+        dataUrl: fileUrl,
       };
       setFormAttachments((prev) => [...prev, att]);
-      toast.success(`File "${file.name}" (${formatFileSize(file.size)}) uploaded successfully.`);
-    };
-    reader.onerror = () => {
-      toast.error('Failed to read file.');
-    };
-    reader.readAsDataURL(file);
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+      toast.success(`Attachment "${file.name}" uploaded and synced!`, { id: 'file-upload' });
+    } catch (err: any) {
+      console.error('File upload error:', err);
+      toast.error('Failed to upload attachment: ' + (err?.message || 'Error'), { id: 'file-upload' });
+    } finally {
+      setIsUploadingAttachment(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 

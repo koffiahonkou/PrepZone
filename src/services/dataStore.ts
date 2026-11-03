@@ -788,6 +788,16 @@ class DataStore {
   public deleteQuiz(id: string): void {
     const quizzes = this.getQuizzes().filter((q) => q.id !== id);
     saveStore(STORAGE_KEYS.QUIZZES, quizzes);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('eduform_quizzes_updated'));
+    }
+    try {
+      deleteDoc(doc(db, 'quizzes', id)).catch((err) => {
+        console.warn('Failed to delete quiz from Firestore:', err);
+      });
+    } catch (e) {
+      console.warn('Firestore quiz delete deferred:', e);
+    }
   }
 
   // --- Submissions ---
@@ -1376,6 +1386,14 @@ class DataStore {
         new CustomEvent('eduform_canned_responses_updated', { detail: canned })
       );
     }
+
+    try {
+      setDoc(doc(db, 'cannedResponses', canned.id), sanitizeForFirestore(canned), { merge: true }).catch((err) => {
+        console.warn('Failed to sync canned response to Firestore:', err);
+      });
+    } catch (e) {
+      console.warn('Firestore canned response sync deferred:', e);
+    }
   }
 
   public deleteCannedResponse(id: string): void {
@@ -1385,6 +1403,14 @@ class DataStore {
       window.dispatchEvent(
         new CustomEvent('eduform_canned_responses_updated', { detail: { id } })
       );
+    }
+
+    try {
+      deleteDoc(doc(db, 'cannedResponses', id)).catch((err) => {
+        console.warn('Failed to delete canned response from Firestore:', err);
+      });
+    } catch (e) {
+      console.warn('Firestore canned response delete deferred:', e);
     }
   }
 
@@ -1412,3 +1438,7 @@ class DataStore {
 }
 
 export const dataStore = new DataStore();
+if (typeof window !== 'undefined') {
+  dataStore.initFirestoreSync();
+}
+
