@@ -777,6 +777,15 @@ class DataStore {
     for (const l of lessons) {
       if (Array.isArray(l.attachments)) {
         for (const att of l.attachments) {
+          if (!att.type) {
+            const ext = att.name?.split('.').pop()?.toLowerCase() || 'file';
+            if (['pdf'].includes(ext)) att.type = 'pdf';
+            else if (['png', 'jpg', 'jpeg', 'webp', 'svg'].includes(ext)) att.type = 'image';
+            else if (['ppt', 'pptx'].includes(ext)) att.type = 'slides';
+            else if (['doc', 'docx'].includes(ext)) att.type = 'doc';
+            else att.type = 'file';
+            modified = true;
+          }
           if (att.dataUrl) {
             if (!att.url || att.url === '#') {
               att.url = att.dataUrl;

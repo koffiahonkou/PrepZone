@@ -285,8 +285,8 @@ export const AdminLessonsPage: React.FC = () => {
     toast.info('Attachment removed.');
   };
 
-  const getAttachmentIcon = (type: string) => {
-    switch (type.toLowerCase()) {
+  const getAttachmentIcon = (type?: string) => {
+    switch (type?.toLowerCase()) {
       case 'pdf':
         return <FileText className="w-4 h-4 text-rose-600" />;
       case 'slides':
@@ -296,6 +296,9 @@ export const AdminLessonsPage: React.FC = () => {
       case 'image':
       case 'png':
       case 'jpg':
+      case 'jpeg':
+      case 'webp':
+      case 'svg':
         return <Image className="w-4 h-4 text-emerald-600" />;
       case 'link':
       case 'web':
@@ -1130,7 +1133,7 @@ export const AdminLessonsPage: React.FC = () => {
                                 {att.name}
                               </span>
                               <div className="flex items-center gap-2 text-[10px] text-slate-400">
-                                <span className="uppercase font-bold text-slate-500">{att.type}</span>
+                                <span className="uppercase font-bold text-slate-500">{att.type || 'FILE'}</span>
                                 {att.size && <span>• {att.size}</span>}
                               </div>
                             </div>

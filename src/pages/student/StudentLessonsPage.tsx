@@ -604,7 +604,7 @@ export const StudentLessonsPage: React.FC = () => {
                           {att.name}
                         </span>
                         <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
-                          <span className="uppercase font-bold text-slate-500">{att.type}</span>
+                          <span className="uppercase font-bold text-slate-500">{att.type || 'FILE'}</span>
                           {att.size && <span>• {att.size}</span>}
                         </div>
                       </div>
