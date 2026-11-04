@@ -1,9 +1,11 @@
 import { ref, uploadBytes, uploadString, getDownloadURL } from 'firebase/storage';
 import { storage } from '@/src/lib/firebase';
 
+let isStorageAvailable: boolean | null = null;
+
 /**
  * Uploads a Data URL (base64 string) to Firebase Storage and returns its public HTTPS URL.
- * Automatically converts huge base64 strings into lightweight cloud URLs.
+ * Automatically times out after 1.5s to prevent hanging if Firebase Storage is unprovisioned.
  */
 export async function uploadDataUrlToStorage(
   dataUrl: string,
@@ -14,21 +16,31 @@ export async function uploadDataUrlToStorage(
     return dataUrl;
   }
 
+  if (isStorageAvailable === false) {
+    return dataUrl;
+  }
+
   try {
     const cleanName = fileNameHint.replace(/[^a-zA-Z0-9._-]/g, '_');
     const path = `${folder}/${Date.now()}_${cleanName}`;
     const storageRef = ref(storage, path);
-    const snapshot = await uploadString(storageRef, dataUrl, 'data_url');
+    const uploadPromise = uploadString(storageRef, dataUrl, 'data_url');
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Storage upload timeout')), 1500)
+    );
+    const snapshot = await Promise.race([uploadPromise, timeoutPromise]);
     const downloadUrl = await getDownloadURL(snapshot.ref);
+    isStorageAvailable = true;
     return downloadUrl;
   } catch (err) {
-    console.warn('Firebase Storage uploadString deferred or unavailable:', err);
+    isStorageAvailable = false;
+    console.warn('Firebase Storage upload unavailable or timed out. Falling back to local payload:', err);
     return dataUrl;
   }
 }
 
 /**
- * Upload a file to Firebase Storage with automatic fallback to optimized base64 Data URL.
+ * Upload a file with automatic image compression and fallback.
  * Produces URLs that work globally across all deployments (AI Studio and Vercel).
  */
 export async function uploadAssetFile(
@@ -37,7 +49,16 @@ export async function uploadAssetFile(
 ): Promise<string> {
   const isImage = file.type.startsWith('image/');
 
-  // For image files, try Firebase Storage first
+  // For images, optimize and compress directly via canvas (< 50KB data URL)
+  // This guarantees instant loading, zero storage bucket dependency, and universal cross-domain sync
+  if (isImage) {
+    try {
+      const compressed = await compressImageToDataUrl(file, 600, 0.82);
+      return compressed;
+    } catch (e) {
+      console.warn('Image canvas compression failed, trying storage:', e);
+    }
+  }
   try {
     const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
     const path = `${folder}/${Date.now()}_${cleanName}`;

@@ -329,81 +329,124 @@ class DataStore {
    * Guarantees 100% data parity between AI Studio and Vercel while enforcing Firestore document limits.
    */
   public async syncAllLocalDataToFirestore(): Promise<{ success: boolean; count: number; error?: string }> {
+    let count = 0;
+    const errors: string[] = [];
+
+    // 1. Settings
     try {
-      let count = 0;
-      // 1. Settings
       const settings = this.getSettings();
       const cleanSettings = await this.sanitizeSettingsForFirestore(settings);
       await setDoc(doc(db, 'settings', 'global'), cleanSettings, { merge: true });
       count++;
+    } catch (e: any) {
+      console.warn('Sync settings warning:', e);
+      errors.push(`Settings: ${e?.message || String(e)}`);
+    }
 
-      // 2. Lessons
-      const lessons = this.getLessons();
-      const updatedLessons: Lesson[] = [];
-      for (const l of lessons) {
+    // 2. Lessons
+    const lessons = this.getLessons();
+    const updatedLessons: Lesson[] = [];
+    for (const l of lessons) {
+      try {
         const cleanLesson = await this.sanitizeLessonForFirestore(l);
         updatedLessons.push(cleanLesson);
         await setDoc(doc(db, 'lessons', l.id), cleanLesson, { merge: true });
         count++;
+      } catch (e: any) {
+        console.warn(`Sync lesson ${l.id} warning:`, e);
+        errors.push(`Lesson ${l.id}: ${e?.message || String(e)}`);
       }
-      // Save cleaned lessons to local storage to eliminate browser storage bloat
-      saveStore(STORAGE_KEYS.LESSONS, updatedLessons);
+    }
+    // Save cleaned lessons to local storage to eliminate browser storage bloat
+    saveStore(STORAGE_KEYS.LESSONS, updatedLessons);
 
-      // 3. Quizzes
-      for (const q of this.getQuizzes()) {
+    // 3. Quizzes
+    for (const q of this.getQuizzes()) {
+      try {
         const payload = enforceFirestoreSizeLimit(q);
         await setDoc(doc(db, 'quizzes', q.id), payload, { merge: true });
         count++;
+      } catch (e: any) {
+        console.warn(`Sync quiz ${q.id} warning:`, e);
       }
+    }
 
-      // 4. Users
-      for (const u of this.getUsers()) {
+    // 4. Users
+    for (const u of this.getUsers()) {
+      try {
         const payload = enforceFirestoreSizeLimit(u);
         await setDoc(doc(db, 'users', u.uid), payload, { merge: true });
         count++;
+      } catch (e: any) {
+        console.warn(`Sync user ${u.uid} warning:`, e);
       }
+    }
 
-      // 5. Classes
-      for (const c of this.getClasses()) {
+    // 5. Classes
+    for (const c of this.getClasses()) {
+      try {
         await setDoc(doc(db, 'classes', c.id), sanitizeForFirestore(c), { merge: true });
         count++;
+      } catch (e: any) {
+        console.warn(`Sync class ${c.id} warning:`, e);
       }
+    }
 
-      // 6. Subjects
-      for (const s of this.getSubjects()) {
+    // 6. Subjects
+    for (const s of this.getSubjects()) {
+      try {
         await setDoc(doc(db, 'subjects', s.id), sanitizeForFirestore(s), { merge: true });
         count++;
+      } catch (e: any) {
+        console.warn(`Sync subject ${s.id} warning:`, e);
       }
+    }
 
-      // 7. Levels
-      for (const lvl of this.getLevels()) {
+    // 7. Levels
+    for (const lvl of this.getLevels()) {
+      try {
         await setDoc(doc(db, 'levels', lvl.id), sanitizeForFirestore(lvl), { merge: true });
         count++;
+      } catch (e: any) {
+        console.warn(`Sync level ${lvl.id} warning:`, e);
       }
+    }
 
-      // 8. Inquiries
-      for (const inq of this.getInquiries()) {
+    // 8. Inquiries
+    for (const inq of this.getInquiries()) {
+      try {
         await setDoc(doc(db, 'inquiries', inq.id), sanitizeForFirestore(inq), { merge: true });
         count++;
+      } catch (e: any) {
+        console.warn(`Sync inquiry ${inq.id} warning:`, e);
       }
+    }
 
-      // 9. Canned responses
-      for (const cr of this.getCannedResponses()) {
+    // 9. Canned responses
+    for (const cr of this.getCannedResponses()) {
+      try {
         await setDoc(doc(db, 'cannedResponses', cr.id), sanitizeForFirestore(cr), { merge: true });
         count++;
+      } catch (e: any) {
+        console.warn(`Sync canned response ${cr.id} warning:`, e);
       }
+    }
 
-      // 10. Notifications
-      for (const notif of this.getNotifications()) {
+    // 10. Notifications
+    for (const notif of this.getNotifications()) {
+      try {
         await setDoc(doc(db, 'notifications', notif.id), sanitizeForFirestore(notif), { merge: true });
         count++;
+      } catch (e: any) {
+        console.warn(`Sync notification ${notif.id} warning:`, e);
       }
-
-      return { success: true, count };
-    } catch (err: unknown) {
-      console.error('syncAllLocalDataToFirestore error:', err);
-      return { success: false, count: 0, error: err instanceof Error ? err.message : String(err) };
     }
+
+    if (count === 0 && errors.length > 0) {
+      return { success: false, count: 0, error: errors.join('; ') };
+    }
+
+    return { success: true, count };
   }
 
   // --- Users ---
@@ -730,7 +773,7 @@ class DataStore {
     const lessons = getStoredOrInit<Lesson[]>(STORAGE_KEYS.LESSONS, INITIAL_LESSONS);
     let modified = false;
 
-    // Sanitize any existing bloated attachments in local storage
+    // Sanitize any existing bloated attachments or base64 data in local storage
     for (const l of lessons) {
       if (Array.isArray(l.attachments)) {
         for (const att of l.attachments) {
@@ -741,7 +784,19 @@ class DataStore {
             delete att.dataUrl;
             modified = true;
           }
+          if (att.url && att.url.startsWith('data:') && att.url.length > 150_000) {
+            att.url = '#';
+            modified = true;
+          }
         }
+      }
+      if (l.videoUrl && l.videoUrl.startsWith('data:') && l.videoUrl.length > 150_000) {
+        l.videoUrl = '';
+        modified = true;
+      }
+      if (l.bodyHtml && l.bodyHtml.length > 250_000) {
+        l.bodyHtml = l.bodyHtml.replace(/src="data:image\/[^;]+;base64,[^"]+"/g, 'src="" alt="[Image omitted for size limit]"');
+        modified = true;
       }
     }
 

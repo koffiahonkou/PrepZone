@@ -126,9 +126,9 @@ export function sanitizeForFirestore<T>(data: T): T {
 
 /**
  * Ensures that any document written to Firestore does not exceed the hard 1 MiB limit (1,048,576 bytes).
- * Intelligently compacts and strips oversized base64 strings if they exceed the 850,000-byte safe threshold.
+ * Intelligently compacts and strips oversized base64 strings or embedded images if they exceed the 800,000-byte safe threshold.
  */
-export function enforceFirestoreSizeLimit<T>(data: T, maxBytes: number = 850_000): T {
+export function enforceFirestoreSizeLimit<T>(data: T, maxBytes: number = 800_000): T {
   const sanitized = sanitizeForFirestore(data);
   try {
     const jsonStr = JSON.stringify(sanitized);
@@ -141,8 +141,16 @@ export function enforceFirestoreSizeLimit<T>(data: T, maxBytes: number = 850_000
 
     function pruneOversizedFields(obj: unknown): unknown {
       if (typeof obj === 'string') {
-        if (obj.startsWith('data:') && obj.length > 50_000) {
-          return '[Data omitted: file exceeds Firestore 1MB document limit]';
+        // Direct large base64 data string (e.g. uploaded video or attachment file)
+        if (obj.startsWith('data:') && obj.length > 30_000) {
+          return '#';
+        }
+        // HTML containing large embedded data:image
+        if (obj.includes('data:image') && obj.length > 50_000) {
+          return obj.replace(/src="data:image\/[^;]+;base64,[^"]+"/g, 'src="" alt="[Image omitted: exceeds 1MB limit]"');
+        }
+        if (obj.length > 350_000) {
+          return obj.slice(0, 350_000) + '...';
         }
         return obj;
       }
@@ -161,7 +169,8 @@ export function enforceFirestoreSizeLimit<T>(data: T, maxBytes: number = 850_000
       return obj;
     }
 
-    return pruneOversizedFields(sanitized) as T;
+    const pruned = pruneOversizedFields(sanitized);
+    return sanitizeForFirestore(pruned) as T;
   } catch {
     return sanitized;
   }
