@@ -133,8 +133,11 @@ export const AdminSettingsPage: React.FC = () => {
     try {
       setIsSyncingCloud(true);
       toast.loading('Synchronizing all data to Firestore Cloud...', { id: 'cloud-sync' });
-      await dataStore.syncAllLocalDataToFirestore();
-      toast.success('Successfully synchronized all data to Firestore! Vercel deployment will reflect changes instantly.', { id: 'cloud-sync' });
+      const result = await dataStore.syncAllLocalDataToFirestore();
+      if (!result.success) {
+        throw new Error(result.error || 'Sync encountered an error.');
+      }
+      toast.success(`Successfully synchronized all ${result.count} data documents to Firestore! Vercel deployment will reflect changes instantly.`, { id: 'cloud-sync' });
     } catch (err: any) {
       console.error('Cloud sync error:', err);
       toast.error('Failed to sync to cloud: ' + (err?.message || 'Unknown error'), { id: 'cloud-sync' });

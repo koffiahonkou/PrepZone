@@ -124,3 +124,46 @@ export function sanitizeForFirestore<T>(data: T): T {
   return cleaned as T;
 }
 
+/**
+ * Ensures that any document written to Firestore does not exceed the hard 1 MiB limit (1,048,576 bytes).
+ * Intelligently compacts and strips oversized base64 strings if they exceed the 850,000-byte safe threshold.
+ */
+export function enforceFirestoreSizeLimit<T>(data: T, maxBytes: number = 850_000): T {
+  const sanitized = sanitizeForFirestore(data);
+  try {
+    const jsonStr = JSON.stringify(sanitized);
+    const size = new TextEncoder().encode(jsonStr).length;
+    if (size <= maxBytes) {
+      return sanitized;
+    }
+
+    console.warn(`Firestore payload exceeds safe threshold (${size} bytes > ${maxBytes} bytes). Compacting oversized fields...`);
+
+    function pruneOversizedFields(obj: unknown): unknown {
+      if (typeof obj === 'string') {
+        if (obj.startsWith('data:') && obj.length > 50_000) {
+          return '[Data omitted: file exceeds Firestore 1MB document limit]';
+        }
+        return obj;
+      }
+      if (Array.isArray(obj)) {
+        return obj.map(pruneOversizedFields);
+      }
+      if (obj && typeof obj === 'object' && !(obj instanceof Date)) {
+        const res: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+          // Drop redundant attachment dataUrl if present
+          if (k === 'dataUrl') continue;
+          res[k] = pruneOversizedFields(v);
+        }
+        return res;
+      }
+      return obj;
+    }
+
+    return pruneOversizedFields(sanitized) as T;
+  } catch {
+    return sanitized;
+  }
+}
+

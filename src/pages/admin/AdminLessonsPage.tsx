@@ -266,7 +266,6 @@ export const AdminLessonsPage: React.FC = () => {
         type: detectedType,
         url: fileUrl,
         size: formatFileSize(file.size),
-        dataUrl: fileUrl,
       };
       setFormAttachments((prev) => [...prev, att]);
       toast.success(`Attachment "${file.name}" uploaded and synced!`, { id: 'file-upload' });

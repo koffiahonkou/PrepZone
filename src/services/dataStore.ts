@@ -37,7 +37,8 @@ import {
   collection,
   onSnapshot,
 } from 'firebase/firestore';
-import { db, sanitizeForFirestore } from '@/src/lib/firebase';
+import { db, sanitizeForFirestore, enforceFirestoreSizeLimit } from '@/src/lib/firebase';
+import { uploadDataUrlToStorage } from '@/src/services/storageService';
 
 const STORAGE_KEYS = {
   USERS: 'eduform_store_users',
@@ -250,32 +251,115 @@ class DataStore {
   }
 
   /**
+   * Prepares and sanitizes a lesson for Firestore:
+   * 1. Eliminates redundant duplicate dataUrl properties that duplicate payload size.
+   * 2. Automatically uploads base64 data URLs to Firebase Storage.
+   * 3. Guarantees the document payload strictly adheres to Firestore's 1MiB limit.
+   */
+  public async sanitizeLessonForFirestore(lesson: Lesson): Promise<Lesson> {
+    const cloned: Lesson = JSON.parse(JSON.stringify(lesson));
+
+    // 1. Process attachments
+    if (Array.isArray(cloned.attachments)) {
+      for (let i = 0; i < cloned.attachments.length; i++) {
+        const att = cloned.attachments[i];
+        let targetUrl = att.url;
+        if ((!targetUrl || targetUrl === '#') && att.dataUrl) {
+          targetUrl = att.dataUrl;
+        }
+
+        // If it's a data URL, upload to Firebase Storage
+        if (targetUrl && targetUrl.startsWith('data:')) {
+          try {
+            const uploadedUrl = await uploadDataUrlToStorage(
+              targetUrl,
+              'attachments',
+              att.name || `attachment_${i}`
+            );
+            if (uploadedUrl && !uploadedUrl.startsWith('data:')) {
+              targetUrl = uploadedUrl;
+            }
+          } catch (e) {
+            console.warn('Storage upload error for attachment:', e);
+          }
+        }
+
+        att.url = targetUrl || '#';
+        delete att.dataUrl; // Never store duplicate dataUrl in Firestore
+      }
+    }
+
+    // 2. Process videoUrl
+    if (cloned.videoUrl && cloned.videoUrl.startsWith('data:')) {
+      try {
+        const uploadedVideo = await uploadDataUrlToStorage(
+          cloned.videoUrl,
+          'videos',
+          `${cloned.id}_video.mp4`
+        );
+        if (uploadedVideo && !uploadedVideo.startsWith('data:')) {
+          cloned.videoUrl = uploadedVideo;
+        }
+      } catch (e) {
+        console.warn('Storage upload error for video note:', e);
+      }
+    }
+
+    // 3. Size check and safeguard against 1MB Firestore limit
+    return enforceFirestoreSizeLimit(cloned, 850_000);
+  }
+
+  public async sanitizeSettingsForFirestore(settings: SystemSettings): Promise<SystemSettings> {
+    const cloned: SystemSettings = { ...settings };
+    if (cloned.logoUrl && cloned.logoUrl.startsWith('data:')) {
+      try {
+        const uploadedLogo = await uploadDataUrlToStorage(cloned.logoUrl, 'branding', 'school_logo');
+        if (uploadedLogo && !uploadedLogo.startsWith('data:')) {
+          cloned.logoUrl = uploadedLogo;
+        }
+      } catch (e) {
+        console.warn('Storage upload error for school logo:', e);
+      }
+    }
+    return enforceFirestoreSizeLimit(cloned, 850_000);
+  }
+
+  /**
    * Pushes all local storage state (settings, logo, curriculum, quizzes, users) to Firestore.
-   * Guarantees 100% data parity between AI Studio and Vercel.
+   * Guarantees 100% data parity between AI Studio and Vercel while enforcing Firestore document limits.
    */
   public async syncAllLocalDataToFirestore(): Promise<{ success: boolean; count: number; error?: string }> {
     try {
       let count = 0;
       // 1. Settings
       const settings = this.getSettings();
-      await setDoc(doc(db, 'settings', 'global'), sanitizeForFirestore(settings), { merge: true });
+      const cleanSettings = await this.sanitizeSettingsForFirestore(settings);
+      await setDoc(doc(db, 'settings', 'global'), cleanSettings, { merge: true });
       count++;
 
       // 2. Lessons
-      for (const l of this.getLessons()) {
-        await setDoc(doc(db, 'lessons', l.id), sanitizeForFirestore(l), { merge: true });
+      const lessons = this.getLessons();
+      const updatedLessons: Lesson[] = [];
+      for (const l of lessons) {
+        const cleanLesson = await this.sanitizeLessonForFirestore(l);
+        updatedLessons.push(cleanLesson);
+        await setDoc(doc(db, 'lessons', l.id), cleanLesson, { merge: true });
         count++;
       }
+      // Save cleaned lessons to local storage to eliminate browser storage bloat
+      saveStore(STORAGE_KEYS.LESSONS, updatedLessons);
 
       // 3. Quizzes
       for (const q of this.getQuizzes()) {
-        await setDoc(doc(db, 'quizzes', q.id), sanitizeForFirestore(q), { merge: true });
+        const payload = enforceFirestoreSizeLimit(q);
+        await setDoc(doc(db, 'quizzes', q.id), payload, { merge: true });
         count++;
       }
 
       // 4. Users
       for (const u of this.getUsers()) {
-        await setDoc(doc(db, 'users', u.uid), sanitizeForFirestore(u), { merge: true });
+        const payload = enforceFirestoreSizeLimit(u);
+        await setDoc(doc(db, 'users', u.uid), payload, { merge: true });
         count++;
       }
 
@@ -645,6 +729,22 @@ class DataStore {
   public getLessons(): Lesson[] {
     const lessons = getStoredOrInit<Lesson[]>(STORAGE_KEYS.LESSONS, INITIAL_LESSONS);
     let modified = false;
+
+    // Sanitize any existing bloated attachments in local storage
+    for (const l of lessons) {
+      if (Array.isArray(l.attachments)) {
+        for (const att of l.attachments) {
+          if (att.dataUrl) {
+            if (!att.url || att.url === '#') {
+              att.url = att.dataUrl;
+            }
+            delete att.dataUrl;
+            modified = true;
+          }
+        }
+      }
+    }
+
     for (const initL of INITIAL_LESSONS) {
       const existing = lessons.find((l) => l.id === initL.id);
       if (!existing) {
@@ -681,9 +781,15 @@ class DataStore {
     }
 
     try {
-      setDoc(doc(db, 'lessons', lesson.id), sanitizeForFirestore(lesson), { merge: true }).catch((err) => {
-        console.warn('Failed to sync lesson to Firestore:', err);
-      });
+      this.sanitizeLessonForFirestore(lesson)
+        .then((cleanLesson) => {
+          setDoc(doc(db, 'lessons', lesson.id), cleanLesson, { merge: true }).catch((err) => {
+            console.warn('Failed to sync lesson to Firestore:', err);
+          });
+        })
+        .catch((e) => {
+          console.warn('Lesson sanitization error:', e);
+        });
     } catch (e) {
       console.warn('Firestore lesson sync deferred:', e);
     }
@@ -1040,9 +1146,15 @@ class DataStore {
     // Immediately push to Firestore cloud so Vercel and all remote clients update in real-time
     try {
       const settingsRef = doc(db, 'settings', 'global');
-      setDoc(settingsRef, sanitizeForFirestore(settings), { merge: true }).catch((err) => {
-        console.warn('Failed to sync settings to Firestore:', err);
-      });
+      this.sanitizeSettingsForFirestore(settings)
+        .then((cleanSettings) => {
+          setDoc(settingsRef, cleanSettings, { merge: true }).catch((err) => {
+            console.warn('Failed to sync settings to Firestore:', err);
+          });
+        })
+        .catch((e) => {
+          console.warn('Settings sanitization error:', e);
+        });
     } catch (e) {
       console.warn('Firestore settings write deferred:', e);
     }

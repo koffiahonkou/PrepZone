@@ -1,5 +1,31 @@
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytes, uploadString, getDownloadURL } from 'firebase/storage';
 import { storage } from '@/src/lib/firebase';
+
+/**
+ * Uploads a Data URL (base64 string) to Firebase Storage and returns its public HTTPS URL.
+ * Automatically converts huge base64 strings into lightweight cloud URLs.
+ */
+export async function uploadDataUrlToStorage(
+  dataUrl: string,
+  folder: string = 'attachments',
+  fileNameHint: string = 'file'
+): Promise<string> {
+  if (!dataUrl || !dataUrl.startsWith('data:')) {
+    return dataUrl;
+  }
+
+  try {
+    const cleanName = fileNameHint.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const path = `${folder}/${Date.now()}_${cleanName}`;
+    const storageRef = ref(storage, path);
+    const snapshot = await uploadString(storageRef, dataUrl, 'data_url');
+    const downloadUrl = await getDownloadURL(snapshot.ref);
+    return downloadUrl;
+  } catch (err) {
+    console.warn('Firebase Storage uploadString deferred or unavailable:', err);
+    return dataUrl;
+  }
+}
 
 /**
  * Upload a file to Firebase Storage with automatic fallback to optimized base64 Data URL.
