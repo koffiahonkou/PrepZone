@@ -26,6 +26,10 @@ import {
   Eye,
   Tv,
   RefreshCw,
+  FileSpreadsheet,
+  FileArchive,
+  FileAudio,
+  FileVideo,
 } from 'lucide-react';
 import { dataStore } from '@/src/services/dataStore';
 import { uploadAssetFile } from '@/src/services/storageService';
@@ -250,28 +254,60 @@ export const AdminLessonsPage: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (file.size > 25 * 1024 * 1024) {
+      toast.error(
+        `"${file.name}" (${(file.size / (1024 * 1024)).toFixed(1)} MB) exceeds the 25MB attachment limit. For large archives or video recordings, please share a link (Google Drive / Dropbox).`
+      );
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
     const extension = file.name.split('.').pop()?.toLowerCase() || 'file';
     let detectedType = 'file';
-    if (['pdf'].includes(extension)) detectedType = 'pdf';
-    else if (['doc', 'docx', 'txt', 'rtf'].includes(extension)) detectedType = 'doc';
-    else if (['ppt', 'pptx'].includes(extension)) detectedType = 'slides';
-    else if (['png', 'jpg', 'jpeg', 'webp', 'svg'].includes(extension)) detectedType = 'image';
+
+    if (['pdf'].includes(extension)) {
+      detectedType = 'pdf';
+    } else if (['doc', 'docx', 'txt', 'rtf', 'odt', 'pages', 'md', 'markdown'].includes(extension)) {
+      detectedType = 'doc';
+    } else if (['ppt', 'pptx', 'pps', 'ppsx', 'odp', 'key', 'keynote'].includes(extension)) {
+      detectedType = 'slides';
+    } else if (['xls', 'xlsx', 'csv', 'tsv', 'ods', 'numbers'].includes(extension)) {
+      detectedType = 'sheets';
+    } else if (
+      ['png', 'jpg', 'jpeg', 'webp', 'svg', 'gif', 'bmp', 'heic', 'tiff', 'ico'].includes(extension) ||
+      file.type.startsWith('image/')
+    ) {
+      detectedType = 'image';
+    } else if (
+      ['mp3', 'wav', 'm4a', 'ogg', 'aac', 'flac', 'wma'].includes(extension) ||
+      file.type.startsWith('audio/')
+    ) {
+      detectedType = 'audio';
+    } else if (
+      ['mp4', 'webm', 'mov', 'm4v', 'avi', 'mkv'].includes(extension) ||
+      file.type.startsWith('video/')
+    ) {
+      detectedType = 'video';
+    } else if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2'].includes(extension)) {
+      detectedType = 'archive';
+    }
 
     try {
       setIsUploadingAttachment(true);
-      toast.loading(`Uploading "${file.name}" to cloud storage...`, { id: 'file-upload' });
+      toast.loading(`Uploading "${file.name}"...`, { id: 'file-upload' });
       const fileUrl = await uploadAssetFile(file, 'attachments');
       const att: LessonAttachment = {
         name: file.name,
         type: detectedType,
         url: fileUrl,
         size: formatFileSize(file.size),
+        dataUrl: fileUrl.startsWith('data:') ? fileUrl : undefined,
       };
       setFormAttachments((prev) => [...prev, att]);
-      toast.success(`Attachment "${file.name}" uploaded and synced!`, { id: 'file-upload' });
+      toast.success(`Attached "${file.name}" successfully!`, { id: 'file-upload' });
     } catch (err: any) {
       console.error('File upload error:', err);
-      toast.error('Failed to upload attachment: ' + (err?.message || 'Error'), { id: 'file-upload' });
+      toast.error('Failed to upload attachment: ' + (err?.message || 'Error processing file'), { id: 'file-upload' });
     } finally {
       setIsUploadingAttachment(false);
       if (fileInputRef.current) {
@@ -292,16 +328,65 @@ export const AdminLessonsPage: React.FC = () => {
       case 'slides':
       case 'ppt':
       case 'pptx':
+      case 'pps':
+      case 'ppsx':
+      case 'odp':
+      case 'key':
+      case 'keynote':
         return <Presentation className="w-4 h-4 text-amber-600" />;
+      case 'doc':
+      case 'docx':
+      case 'txt':
+      case 'rtf':
+      case 'odt':
+      case 'pages':
+      case 'md':
+      case 'markdown':
+        return <FileText className="w-4 h-4 text-blue-600" />;
+      case 'sheets':
+      case 'sheet':
+      case 'xls':
+      case 'xlsx':
+      case 'csv':
+      case 'tsv':
+      case 'ods':
+      case 'numbers':
+        return <FileSpreadsheet className="w-4 h-4 text-emerald-600" />;
       case 'image':
       case 'png':
       case 'jpg':
       case 'jpeg':
       case 'webp':
       case 'svg':
+      case 'gif':
+      case 'bmp':
+      case 'heic':
         return <Image className="w-4 h-4 text-emerald-600" />;
+      case 'audio':
+      case 'mp3':
+      case 'wav':
+      case 'm4a':
+      case 'ogg':
+      case 'aac':
+      case 'flac':
+        return <FileAudio className="w-4 h-4 text-purple-600" />;
+      case 'video':
+      case 'mp4':
+      case 'webm':
+      case 'mov':
+      case 'm4v':
+      case 'avi':
+        return <FileVideo className="w-4 h-4 text-red-600" />;
+      case 'archive':
+      case 'zip':
+      case 'rar':
+      case '7z':
+      case 'tar':
+      case 'gz':
+        return <FileArchive className="w-4 h-4 text-amber-700" />;
       case 'link':
       case 'web':
+      case 'url':
         return <ExternalLink className="w-4 h-4 text-blue-600" />;
       default:
         return <File className="w-4 h-4 text-slate-600" />;
@@ -1024,16 +1109,21 @@ export const AdminLessonsPage: React.FC = () => {
                     ref={fileInputRef}
                     onChange={handleFileUpload}
                     className="hidden"
-                    accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.png,.jpg,.jpeg,.webp"
+                    accept="*/*"
                   />
 
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0F2A4A] hover:bg-[#163c68] text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer"
-                  >
-                    <UploadCloud className="w-4 h-4" /> Upload Local Document
-                  </button>
+                  <div className="flex flex-col items-start sm:items-end">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0F2A4A] hover:bg-[#163c68] text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+                    >
+                      <UploadCloud className="w-4 h-4" /> Upload Document or File
+                    </button>
+                    <span className="text-[10px] text-slate-400 mt-1">
+                      PDF, Word, Excel, PowerPoint, CSV, Audio, Images, ZIP
+                    </span>
+                  </div>
                 </div>
 
                 {/* Preset Fast-Add Buttons */}
@@ -1086,10 +1176,15 @@ export const AdminLessonsPage: React.FC = () => {
                       className="w-full px-3 py-2 text-xs border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-hidden focus:border-[#0F2A4A]"
                     >
                       <option value="pdf">PDF Document (.pdf)</option>
+                      <option value="doc">Word / Text Document (.docx, .txt)</option>
                       <option value="slides">Slides Presentation (.pptx)</option>
-                      <option value="doc">Word / Text Document (.docx)</option>
-                      <option value="image">Diagram / Chart (.png)</option>
+                      <option value="sheets">Spreadsheet / CSV (.xlsx, .csv)</option>
+                      <option value="image">Diagram / Picture (.png, .jpg)</option>
+                      <option value="audio">Audio / Voice Note (.mp3, .wav)</option>
+                      <option value="video">Video Clip (.mp4)</option>
+                      <option value="archive">ZIP / Archive (.zip)</option>
                       <option value="link">External Web Link (.url)</option>
+                      <option value="file">Other File Format</option>
                     </select>
                   </div>
                   <div className="sm:col-span-2">
@@ -1140,10 +1235,12 @@ export const AdminLessonsPage: React.FC = () => {
                           </div>
 
                           <div className="flex items-center gap-1 shrink-0 ml-2">
-                            {att.dataUrl && (
+                            {(att.dataUrl || (att.url && att.url !== '#')) && (
                               <a
-                                href={att.dataUrl}
+                                href={att.dataUrl || att.url}
                                 download={att.name}
+                                target="_blank"
+                                rel="noopener noreferrer"
                                 className="p-1 rounded text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors"
                                 title="Download uploaded file preview"
                               >

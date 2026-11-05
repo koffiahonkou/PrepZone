@@ -91,6 +91,8 @@ export default function App() {
                 }
               >
                 <Route path="/admin/inquiries" element={<TeacherInquiriesPage />} />
+                <Route path="/teacher/inquiries" element={<TeacherInquiriesPage />} />
+                <Route path="/inquiries" element={<Navigate to="/admin/inquiries" replace />} />
                 <Route path="/admin/lessons" element={<AdminLessonsPage />} />
                 <Route path="/admin/quizzes" element={<AdminQuizzesPage />} />
                 <Route

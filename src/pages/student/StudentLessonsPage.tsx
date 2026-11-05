@@ -29,6 +29,10 @@ import {
   BarChart3,
   Flame,
   Layers,
+  FileSpreadsheet,
+  FileArchive,
+  FileAudio,
+  FileVideo,
 } from 'lucide-react';
 import { dataStore } from '@/src/services/dataStore';
 import { useAuth } from '@/src/context/AuthContext';
@@ -259,20 +263,72 @@ export const StudentLessonsPage: React.FC = () => {
     saveProgressMap(nextMap);
   };
 
-  const getAttachmentIcon = (type: string) => {
+  const getAttachmentIcon = (type?: string) => {
     switch (type?.toLowerCase()) {
       case 'pdf':
         return <FileText className="w-4 h-4 text-rose-600" />;
       case 'slides':
       case 'ppt':
       case 'pptx':
+      case 'pps':
+      case 'ppsx':
+      case 'odp':
+      case 'key':
+      case 'keynote':
         return <Presentation className="w-4 h-4 text-amber-600" />;
+      case 'doc':
+      case 'docx':
+      case 'txt':
+      case 'rtf':
+      case 'odt':
+      case 'pages':
+      case 'md':
+      case 'markdown':
+        return <FileText className="w-4 h-4 text-blue-600" />;
+      case 'sheets':
+      case 'sheet':
+      case 'xls':
+      case 'xlsx':
+      case 'csv':
+      case 'tsv':
+      case 'ods':
+      case 'numbers':
+        return <FileSpreadsheet className="w-4 h-4 text-emerald-600" />;
       case 'image':
       case 'png':
       case 'jpg':
+      case 'jpeg':
+      case 'webp':
+      case 'svg':
+      case 'gif':
+      case 'bmp':
+      case 'heic':
         return <Image className="w-4 h-4 text-emerald-600" />;
+      case 'audio':
+      case 'mp3':
+      case 'wav':
+      case 'm4a':
+      case 'ogg':
+      case 'aac':
+      case 'flac':
+        return <FileAudio className="w-4 h-4 text-purple-600" />;
+      case 'video':
+      case 'mp4':
+      case 'webm':
+      case 'mov':
+      case 'm4v':
+      case 'avi':
+        return <FileVideo className="w-4 h-4 text-red-600" />;
+      case 'archive':
+      case 'zip':
+      case 'rar':
+      case '7z':
+      case 'tar':
+      case 'gz':
+        return <FileArchive className="w-4 h-4 text-amber-700" />;
       case 'link':
       case 'web':
+      case 'url':
         return <ExternalLink className="w-4 h-4 text-blue-600" />;
       default:
         return <File className="w-4 h-4 text-slate-600" />;

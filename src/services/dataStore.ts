@@ -345,20 +345,25 @@ class DataStore {
 
     // 2. Lessons
     const lessons = this.getLessons();
-    const updatedLessons: Lesson[] = [];
     for (const l of lessons) {
       try {
         const cleanLesson = await this.sanitizeLessonForFirestore(l);
-        updatedLessons.push(cleanLesson);
         await setDoc(doc(db, 'lessons', l.id), cleanLesson, { merge: true });
+        // If an attachment was uploaded to a public cloud storage URL, save that back
+        if (Array.isArray(cleanLesson.attachments) && Array.isArray(l.attachments)) {
+          cleanLesson.attachments.forEach((cleanAtt, i) => {
+            if (cleanAtt.url && cleanAtt.url.startsWith('https://') && l.attachments[i]) {
+              l.attachments[i].url = cleanAtt.url;
+            }
+          });
+        }
         count++;
       } catch (e: any) {
         console.warn(`Sync lesson ${l.id} warning:`, e);
         errors.push(`Lesson ${l.id}: ${e?.message || String(e)}`);
       }
     }
-    // Save cleaned lessons to local storage to eliminate browser storage bloat
-    saveStore(STORAGE_KEYS.LESSONS, updatedLessons);
+    saveStore(STORAGE_KEYS.LESSONS, lessons);
 
     // 3. Quizzes
     for (const q of this.getQuizzes()) {
@@ -773,16 +778,21 @@ class DataStore {
     const lessons = getStoredOrInit<Lesson[]>(STORAGE_KEYS.LESSONS, INITIAL_LESSONS);
     let modified = false;
 
-    // Sanitize any existing bloated attachments or base64 data in local storage
+    // Normalize attachment metadata and ensure url is populated
     for (const l of lessons) {
       if (Array.isArray(l.attachments)) {
         for (const att of l.attachments) {
           if (!att.type) {
             const ext = att.name?.split('.').pop()?.toLowerCase() || 'file';
             if (['pdf'].includes(ext)) att.type = 'pdf';
-            else if (['png', 'jpg', 'jpeg', 'webp', 'svg'].includes(ext)) att.type = 'image';
-            else if (['ppt', 'pptx'].includes(ext)) att.type = 'slides';
-            else if (['doc', 'docx'].includes(ext)) att.type = 'doc';
+            else if (['doc', 'docx', 'txt', 'rtf', 'odt', 'pages', 'md', 'markdown'].includes(ext)) att.type = 'doc';
+            else if (['ppt', 'pptx', 'pps', 'ppsx', 'odp', 'key', 'keynote'].includes(ext)) att.type = 'slides';
+            else if (['xls', 'xlsx', 'csv', 'tsv', 'ods', 'numbers'].includes(ext)) att.type = 'sheets';
+            else if (['png', 'jpg', 'jpeg', 'webp', 'svg', 'gif', 'bmp', 'heic'].includes(ext)) att.type = 'image';
+            else if (['mp3', 'wav', 'm4a', 'ogg', 'aac', 'flac', 'wma'].includes(ext)) att.type = 'audio';
+            else if (['mp4', 'webm', 'mov', 'm4v', 'avi'].includes(ext)) att.type = 'video';
+            else if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) att.type = 'archive';
+            else if (att.url && (att.url.startsWith('http://') || att.url.startsWith('https://'))) att.type = 'link';
             else att.type = 'file';
             modified = true;
           }
@@ -793,19 +803,7 @@ class DataStore {
             delete att.dataUrl;
             modified = true;
           }
-          if (att.url && att.url.startsWith('data:') && att.url.length > 150_000) {
-            att.url = '#';
-            modified = true;
-          }
         }
-      }
-      if (l.videoUrl && l.videoUrl.startsWith('data:') && l.videoUrl.length > 150_000) {
-        l.videoUrl = '';
-        modified = true;
-      }
-      if (l.bodyHtml && l.bodyHtml.length > 250_000) {
-        l.bodyHtml = l.bodyHtml.replace(/src="data:image\/[^;]+;base64,[^"]+"/g, 'src="" alt="[Image omitted for size limit]"');
-        modified = true;
       }
     }
 

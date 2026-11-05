@@ -40,51 +40,70 @@ export async function uploadDataUrlToStorage(
 }
 
 /**
+ * Reads any File or Blob into a Base64 Data URL.
+ * Works uniformly in every browser for all MIME types and file extensions.
+ */
+export function readFileAsDataUrl(file: File | Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error(`Failed to read "${(file as File).name || 'file'}"`));
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
  * Upload a file with automatic image compression and fallback.
  * Produces URLs that work globally across all deployments (AI Studio and Vercel).
+ * Supports ALL file formats (PDF, Word, Excel, PowerPoint, CSV, Audio, Video, Archives, Images, Text).
  */
 export async function uploadAssetFile(
   file: File,
   folder: string = 'branding'
 ): Promise<string> {
-  const isImage = file.type.startsWith('image/');
+  const isImage = file.type.startsWith('image/') || /\.(png|jpe?g|webp|svg|gif|bmp|heic|ico)$/i.test(file.name);
+  const isSvg = file.type === 'image/svg+xml' || /\.svg$/i.test(file.name);
+  const isGif = file.type === 'image/gif' || /\.gif$/i.test(file.name);
 
-  // For images, optimize and compress directly via canvas (< 50KB data URL)
-  // This guarantees instant loading, zero storage bucket dependency, and universal cross-domain sync
-  if (isImage) {
+  // 1. For standard raster images (PNG, JPEG, WEBP), compress directly in browser canvas for fast loading (<60KB)
+  if (isImage && !isSvg && !isGif) {
     try {
-      const compressed = await compressImageToDataUrl(file, 600, 0.82);
+      const compressed = await compressImageToDataUrl(file, 800, 0.85);
       return compressed;
     } catch (e) {
-      console.warn('Image canvas compression failed, trying storage:', e);
+      console.warn('Image canvas compression failed, continuing with direct file:', e);
     }
   }
+
+  // 2. If storage is known to be unavailable, don't waste time calling Firebase Storage
+  if (isStorageAvailable === false) {
+    return readFileAsDataUrl(file);
+  }
+
+  // 3. Try Firebase Storage with a strict 1.2s timeout race
   try {
     const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
     const path = `${folder}/${Date.now()}_${cleanName}`;
     const storageRef = ref(storage, path);
-    const snapshot = await uploadBytes(storageRef, file, {
-      contentType: file.type,
+    const uploadPromise = uploadBytes(storageRef, file, {
+      contentType: file.type || 'application/octet-stream',
       customMetadata: {
         originalName: file.name,
         uploadedAt: new Date().toISOString(),
       },
-    });
-    const downloadUrl = await getDownloadURL(snapshot.ref);
+    }).then((snap) => getDownloadURL(snap.ref));
+
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Firebase Storage upload timeout')), 1200)
+    );
+
+    const downloadUrl = await Promise.race([uploadPromise, timeoutPromise]);
+    isStorageAvailable = true;
     return downloadUrl;
   } catch (storageError) {
-    console.warn('Direct Firebase Storage upload unavailable or deferred, generating optimized Data URL:', storageError);
-
-    if (isImage) {
-      return compressImageToDataUrl(file, 800, 0.85);
-    }
-
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
+    isStorageAvailable = false;
+    console.warn('Firebase Storage direct upload unavailable or timed out, generating persistent Data URL:', storageError);
+    return readFileAsDataUrl(file);
   }
 }
 
