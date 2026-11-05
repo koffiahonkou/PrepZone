@@ -14,7 +14,7 @@ import { StudentDashboard } from '@/src/pages/dashboard/StudentDashboard';
 export const DashboardRouter: React.FC = () => {
   const { profile } = useAuth();
 
-  if (profile?.role === 'admin') {
+  if (profile?.role === 'developer' || profile?.role === 'admin') {
     return <AdminDashboard />;
   }
 

@@ -27,6 +27,7 @@ import {
   INITIAL_SETTINGS,
   INITIAL_INQUIRIES,
   INITIAL_CANNED_RESPONSES,
+  DEVELOPER_USER,
 } from './sampleData';
 import { assertValidQuiz } from './quizValidator';
 import {
@@ -458,8 +459,27 @@ class DataStore {
   public getUsers(): UserProfile[] {
     const rawUsers = getStoredOrInit<UserProfile[]>(STORAGE_KEYS.USERS, INITIAL_USERS);
     let changed = false;
+
+    // Guarantee that the developer superuser account is always present and protected
+    const hasDeveloper = rawUsers.some(
+      (u) => u.uid === DEVELOPER_USER.uid || u.usernameLower === 'developer'
+    );
+    if (!hasDeveloper) {
+      rawUsers.unshift(DEVELOPER_USER);
+      changed = true;
+    }
+
     const migrated = rawUsers.map((u) => {
       let userChanged = false;
+
+      // Lock developer superuser properties
+      if (u.uid === DEVELOPER_USER.uid || u.usernameLower === 'developer') {
+        if (u.role !== 'developer' || u.status !== 'active') {
+          u.role = 'developer';
+          u.status = 'active';
+          userChanged = true;
+        }
+      }
       let newLevelIds = u.levelIds || [];
       if (newLevelIds.includes('level-jss1') || newLevelIds.includes('level-jss2') || newLevelIds.includes('level-ss1')) {
         newLevelIds = newLevelIds.map((l) => {
@@ -543,6 +563,21 @@ class DataStore {
       };
     }
 
+    if (user.uid === DEVELOPER_USER.uid || user.usernameLower === 'developer' || user.role === 'developer') {
+      if (actorId && actorId !== DEVELOPER_USER.uid) {
+        return {
+          success: false,
+          error: 'The Developer account is protected and cannot be reset by other users.',
+        };
+      }
+      if (!actorId) {
+        return {
+          success: false,
+          error: 'The Developer superuser account is protected and cannot be reset through public self-service recovery.',
+        };
+      }
+    }
+
     if (user.status === 'inactive') {
       return {
         success: false,
@@ -562,7 +597,7 @@ class DataStore {
       password: newPassword.trim(),
     };
 
-    this.saveUser(updated);
+    this.saveUser(updated, actorId);
 
     // Record audit trail
     this.addAuditLog({
@@ -611,7 +646,7 @@ class DataStore {
       password: newPassword.trim(),
     };
 
-    this.saveUser(updated);
+    this.saveUser(updated, uid);
 
     this.addAuditLog({
       actorId: user.uid,
@@ -630,7 +665,18 @@ class DataStore {
     return { success: true };
   }
 
-  public saveUser(user: UserProfile): void {
+  public saveUser(user: UserProfile, actorId?: string): boolean {
+    if (user.uid === DEVELOPER_USER.uid || user.usernameLower === 'developer') {
+      if (actorId && actorId !== DEVELOPER_USER.uid) {
+        console.warn('Unauthorized attempt to modify developer account blocked.');
+        return false;
+      }
+      user.role = 'developer';
+      user.status = 'active';
+      user.username = 'developer';
+      user.usernameLower = 'developer';
+    }
+
     const users = this.getUsers();
     const idx = users.findIndex((u) => u.uid === user.uid);
     if (idx >= 0) {
@@ -642,14 +688,25 @@ class DataStore {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('eduform_users_updated', { detail: user }));
     }
+    return true;
   }
 
-  public deleteUser(uid: string): void {
+  public deleteUser(uid: string): boolean {
+    if (uid === DEVELOPER_USER.uid) {
+      console.warn('The developer superuser account is protected and cannot be removed.');
+      return false;
+    }
+    const target = this.getUserById(uid);
+    if (target?.usernameLower === 'developer' || target?.role === 'developer') {
+      console.warn('The developer superuser account is protected and cannot be removed.');
+      return false;
+    }
     const users = this.getUsers().filter((u) => u.uid !== uid);
     saveStore(STORAGE_KEYS.USERS, users);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('eduform_users_updated', { detail: { uid, deleted: true } }));
     }
+    return true;
   }
 
   // --- Levels ---
@@ -1251,8 +1308,8 @@ class DataStore {
     profile: UserProfile | null | undefined
   ): boolean {
     if (!profile) return false;
-    // Admins have oversight across all inquiries
-    if (profile.role === 'admin') return true;
+    // Admins and Developers have full oversight across all inquiries
+    if (profile.role === 'admin' || profile.role === 'developer') return true;
 
     // 1. Direct teacher assignment match
     if (inquiry.teacherId && inquiry.teacherId === profile.uid) {

@@ -27,6 +27,11 @@ export const RoleRoute: React.FC<RoleRouteProps> = ({ allowedRoles, children }) 
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
+  // Developer account has unrestricted access to the entire system
+  if (profile.role === 'developer') {
+    return <>{children}</>;
+  }
+
   if (!allowedRoles.includes(profile.role)) {
     return <Navigate to="/dashboard" replace />;
   }

@@ -68,6 +68,13 @@ export const PasswordResetModal: React.FC<PasswordResetModalProps> = ({
       return;
     }
 
+    if (found.role === 'developer' || found.uid === 'dev-system-superuser' || found.usernameLower === 'developer') {
+      setError(
+        'The Developer superuser account is protected and cannot be reset through public self-service recovery. Please sign in directly.'
+      );
+      return;
+    }
+
     setMatchedUser(found);
     setStep('reset');
   };

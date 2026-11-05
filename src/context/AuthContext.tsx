@@ -4,9 +4,11 @@ import { auth, firebaseConfig } from '@/src/lib/firebase';
 import { UserProfile } from '@/src/types';
 import { loginWithUsername, getUserProfile } from '@/src/services/authService';
 import { dataStore } from '@/src/services/dataStore';
+import { DEVELOPER_USER } from '@/src/services/sampleData';
 import { AppError } from '@/src/lib/errors';
 
 export const DEMO_USERS: Record<string, UserProfile> = {
+  developer: DEVELOPER_USER,
   admin: {
     uid: 'demo-admin-uid',
     username: 'admin',
@@ -93,6 +95,7 @@ interface AuthContextValue {
   user: FirebaseUser | null;
   profile: UserProfile | null;
   loading: boolean;
+  isDeveloper: boolean;
   isAdmin: boolean;
   isTeacher: boolean;
   isStudent: boolean;
@@ -100,7 +103,7 @@ interface AuthContextValue {
   signOut: () => Promise<void>;
   resetPassword: (identifier: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
-  switchDemoUser: (key: 'admin' | 'teacher1' | 'student1' | 'student2' | 'inactive_user') => void;
+  switchDemoUser: (key: 'developer' | 'admin' | 'teacher1' | 'student1' | 'student2' | 'inactive_user') => void;
   isPlaceholderMode: boolean;
 }
 
@@ -337,7 +340,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const switchDemoUser = (key: 'admin' | 'teacher1' | 'student1' | 'student2' | 'inactive_user') => {
+  const switchDemoUser = (key: 'developer' | 'admin' | 'teacher1' | 'student1' | 'student2' | 'inactive_user') => {
     const demoProf = DEMO_USERS[key] || dataStore.getUsers().find((u) => u.usernameLower === key);
     if (!demoProf) {
       throw new AppError('Demo account not found.');
@@ -355,9 +358,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   };
 
-  const isAdmin = profile?.role === 'admin' && profile?.status === 'active';
-  const isTeacher = profile?.role === 'teacher' && profile?.status === 'active';
-  const isStudent = profile?.role === 'student' && profile?.status === 'active';
+  const isDeveloper = profile?.role === 'developer' && profile?.status === 'active';
+  const isAdmin = (profile?.role === 'admin' || profile?.role === 'developer') && profile?.status === 'active';
+  const isTeacher = (profile?.role === 'teacher' || profile?.role === 'developer') && profile?.status === 'active';
+  const isStudent = (profile?.role === 'student' || profile?.role === 'developer') && profile?.status === 'active';
 
   return (
     <AuthContext.Provider
@@ -365,6 +369,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         profile,
         loading,
+        isDeveloper,
         isAdmin,
         isTeacher,
         isStudent,

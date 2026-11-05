@@ -26,6 +26,7 @@ import {
 import { useAuth } from '@/src/context/AuthContext';
 import { dataStore } from '@/src/services/dataStore';
 import { StudentInquiry, InquiryStatus, UserProfile, Subject } from '@/src/types';
+import DOMPurify from 'dompurify';
 import { toast } from 'sonner';
 
 export const StudentAskTeacherPage: React.FC = () => {
@@ -837,13 +838,20 @@ export const StudentAskTeacherPage: React.FC = () => {
                     </div>
 
                     <div
-                      className={`p-3.5 rounded-2xl max-w-xl text-xs leading-relaxed whitespace-pre-wrap ${
+                      className={`p-3.5 rounded-2xl max-w-xl text-xs leading-relaxed ${
                         isStudent
                           ? 'bg-[#0F2A4A] text-white rounded-tr-xs shadow-2xs'
                           : 'bg-indigo-50/70 text-slate-800 border border-indigo-100 rounded-tl-xs shadow-2xs'
                       }`}
                     >
-                      {msg.content}
+                      {/<[a-z][\s\S]*>/i.test(msg.content) ? (
+                        <div
+                          className="rich-text-content space-y-1.5 leading-relaxed"
+                          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(msg.content) }}
+                        />
+                      ) : (
+                        <span className="whitespace-pre-wrap">{msg.content}</span>
+                      )}
                     </div>
                   </div>
                 );

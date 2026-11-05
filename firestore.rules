@@ -29,7 +29,7 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isSuperAdmin() || (hasUserDoc() && currentUserData().role == 'admin' && currentUserData().status == 'active');
+      return isSuperAdmin() || (hasUserDoc() && (currentUserData().role == 'admin' || currentUserData().role == 'developer') && currentUserData().status == 'active');
     }
 
     function isStaff() {
@@ -103,7 +103,9 @@ service cloud.firestore {
     }
 
     // USERS COLLECTION
+    // The developer superuser account is permanently protected against deletion
     match /users/{userId} {
+      allow delete: if userId != 'dev-system-superuser';
       allow read, write: if true;
     }
 

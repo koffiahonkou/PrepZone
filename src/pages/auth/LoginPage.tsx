@@ -18,6 +18,7 @@ import {
   Mail,
   Sun,
   Moon,
+  Code2,
 } from 'lucide-react';
 import { useAuth } from '@/src/context/AuthContext';
 import { useColorMode } from '@/src/context/ColorModeContext';
@@ -79,7 +80,7 @@ export const LoginPage: React.FC = () => {
   // Redirect if already logged in
   React.useEffect(() => {
     if (profile) {
-      if (profile.role === 'admin') {
+      if (profile.role === 'admin' || profile.role === 'developer') {
         navigate('/admin', { replace: true });
       } else {
         navigate('/dashboard', { replace: true });
@@ -316,6 +317,28 @@ export const LoginPage: React.FC = () => {
               </span>
             </div>
             <div className="grid grid-cols-2 gap-2 text-xs">
+              {/* Developer Superuser Account */}
+              <button
+                type="button"
+                onClick={() => {
+                  handleQuickFill('developer');
+                  switchDemoUser('developer');
+                  toast.success('Switched to System Developer session (Superuser Mode).');
+                  navigate('/admin');
+                }}
+                className="col-span-2 p-2.5 rounded-lg border border-violet-300 bg-violet-50/80 hover:bg-violet-100 text-left transition-colors flex items-center justify-between cursor-pointer"
+              >
+                <div className="flex flex-col gap-0.5">
+                  <span className="font-bold text-violet-900 flex items-center gap-1.5">
+                    <Code2 className="w-3.5 h-3.5 text-violet-700" /> Developer (System Superuser)
+                  </span>
+                  <span className="text-[11px] text-violet-700 font-mono">@developer • Full system access • Protected</span>
+                </div>
+                <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-violet-200 text-violet-900 uppercase tracking-wider">
+                  MASTER
+                </span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => {

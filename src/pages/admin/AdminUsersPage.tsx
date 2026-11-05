@@ -21,12 +21,16 @@ import {
   Sparkles,
   KeyRound,
   Check,
+  Code2,
+  ShieldAlert,
 } from 'lucide-react';
+import { useAuth } from '@/src/context/AuthContext';
 import { dataStore } from '@/src/services/dataStore';
 import { UserProfile, UserRole, UserStatus } from '@/src/types';
 import { toast } from 'sonner';
 
 export const AdminUsersPage: React.FC = () => {
+  const { profile: currentLoggedInUser } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>(() => dataStore.getUsers());
   const classes = dataStore.getClasses();
   const levels = dataStore.getLevels();
@@ -119,6 +123,10 @@ export const AdminUsersPage: React.FC = () => {
   const toggleStatus = (uid: string) => {
     const target = users.find((u) => u.uid === uid);
     if (!target) return;
+    if (target.role === 'developer' || target.uid === 'dev-system-superuser' || target.usernameLower === 'developer') {
+      toast.error('The developer superuser account is permanently active and cannot be deactivated.');
+      return;
+    }
     const newStatus: UserStatus = target.status === 'active' ? 'inactive' : 'active';
     const updated = { ...target, status: newStatus };
     dataStore.saveUser(updated);
@@ -130,7 +138,7 @@ export const AdminUsersPage: React.FC = () => {
     setEditingUser(null);
     setFormFullName('');
     setFormUsername('');
-    setFormRole(defaultRole);
+    setFormRole(defaultRole === 'developer' ? 'student' : defaultRole);
     setFormStatus('active');
     setFormLevelIds([levels[0]?.id || 'level-basic']);
     const defaultClasses = classes.filter((c) => c.levelId === (levels[0]?.id || 'level-basic'));
@@ -143,6 +151,12 @@ export const AdminUsersPage: React.FC = () => {
   };
 
   const openEditModal = (u: UserProfile) => {
+    if (u.role === 'developer' || u.uid === 'dev-system-superuser' || u.usernameLower === 'developer') {
+      if (currentLoggedInUser?.role !== 'developer') {
+        toast.error('The developer account is protected and cannot be edited by any other user.');
+        return;
+      }
+    }
     setEditingUser(u);
     setFormFullName(u.fullName);
     setFormUsername(u.username);
@@ -168,6 +182,23 @@ export const AdminUsersPage: React.FC = () => {
       return;
     }
 
+    if (cleanUsername === 'developer' && (!editingUser || editingUser.usernameLower !== 'developer')) {
+      toast.error('The username "@developer" is strictly reserved for the system developer account.');
+      return;
+    }
+
+    if (formRole === 'developer' && currentLoggedInUser?.role !== 'developer') {
+      toast.error('The developer role cannot be assigned by other users.');
+      return;
+    }
+
+    if (editingUser && (editingUser.role === 'developer' || editingUser.uid === 'dev-system-superuser')) {
+      if (currentLoggedInUser?.role !== 'developer') {
+        toast.error('The developer superuser account cannot be modified by other users.');
+        return;
+      }
+    }
+
     // Check availability if adding or changing username
     if (!editingUser || editingUser.usernameLower !== cleanUsername) {
       const existing = users.find((u) => u.usernameLower === cleanUsername);
@@ -187,14 +218,14 @@ export const AdminUsersPage: React.FC = () => {
         username: formUsername.trim(),
         usernameLower: cleanUsername,
         authEmail: `${cleanUsername}@eduform.local`,
-        role: formRole,
-        status: formStatus,
+        role: editingUser.role === 'developer' ? 'developer' : formRole,
+        status: editingUser.role === 'developer' ? 'active' : formStatus,
         levelIds: formLevelIds,
         classIds: formClassIds,
         subjectIds: formSubjectIds,
         password: finalPassword,
       };
-      dataStore.saveUser(updated);
+      dataStore.saveUser(updated, currentLoggedInUser?.uid);
       toast.success(`Account for ${updated.fullName} (@${updated.username}) updated.`);
     } else {
       const newUser: UserProfile = {
@@ -203,17 +234,17 @@ export const AdminUsersPage: React.FC = () => {
         usernameLower: cleanUsername,
         authEmail: `${cleanUsername}@eduform.local`,
         fullName: formFullName.trim(),
-        role: formRole,
+        role: formRole === 'developer' ? 'student' : formRole,
         status: formStatus,
         levelIds: formLevelIds,
         classIds: formClassIds,
         subjectIds: formSubjectIds,
         password: finalPassword,
-        createdBy: 'Dr. Evelyn Reed (Admin)',
+        createdBy: currentLoggedInUser?.fullName || 'Dr. Evelyn Reed (Admin)',
         createdAt: now,
         lastLoginAt: null,
       };
-      dataStore.saveUser(newUser);
+      dataStore.saveUser(newUser, currentLoggedInUser?.uid);
       toast.success(`Account created: @${newUser.username} (${newUser.fullName}).`);
     }
 
@@ -223,6 +254,11 @@ export const AdminUsersPage: React.FC = () => {
 
   const handleDelete = () => {
     if (!deleteTarget) return;
+    if (deleteTarget.role === 'developer' || deleteTarget.uid === 'dev-system-superuser' || deleteTarget.usernameLower === 'developer') {
+      toast.error('The developer superuser account is protected and cannot be removed.');
+      setDeleteTarget(null);
+      return;
+    }
     dataStore.deleteUser(deleteTarget.uid);
     setUsers(dataStore.getUsers());
     setDeleteTarget(null);
@@ -318,6 +354,7 @@ export const AdminUsersPage: React.FC = () => {
             className="px-3 py-2 text-xs rounded-lg border border-slate-300 bg-white text-slate-700 focus:outline-hidden"
           >
             <option value="all">All Roles</option>
+            <option value="developer">Developers (System Master)</option>
             <option value="student">Students</option>
             <option value="teacher">Teachers</option>
             <option value="admin">Administrators</option>
@@ -397,17 +434,26 @@ export const AdminUsersPage: React.FC = () => {
                         <div className="flex items-center gap-3">
                           <div
                             className={`w-8 h-8 rounded-full text-white flex items-center justify-center font-bold text-xs shrink-0 ${
-                              u.role === 'admin'
+                              u.role === 'developer'
+                                ? 'bg-gradient-to-tr from-violet-700 to-indigo-600 ring-2 ring-violet-400/40'
+                                : u.role === 'admin'
                                 ? 'bg-[#0F2A4A]'
                                 : u.role === 'teacher'
                                 ? 'bg-purple-700'
                                 : 'bg-emerald-700'
                             }`}
                           >
-                            {u.fullName.charAt(0)}
+                            {u.role === 'developer' ? <Code2 className="w-4 h-4" /> : u.fullName.charAt(0)}
                           </div>
                           <div>
-                            <p className="font-bold text-slate-900 leading-tight">{u.fullName}</p>
+                            <div className="flex items-center gap-1.5">
+                              <p className="font-bold text-slate-900 leading-tight">{u.fullName}</p>
+                              {u.role === 'developer' && (
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider bg-violet-100 text-violet-800 border border-violet-200">
+                                  Superuser
+                                </span>
+                              )}
+                            </div>
                             <p className="text-[11px] text-slate-400 font-mono">@{u.username}</p>
                           </div>
                         </div>
@@ -417,13 +463,16 @@ export const AdminUsersPage: React.FC = () => {
                       <td className="py-3.5 px-4">
                         <span
                           className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                            u.role === 'admin'
+                            u.role === 'developer'
+                              ? 'bg-violet-100 text-violet-800 border border-violet-200'
+                              : u.role === 'admin'
                               ? 'bg-purple-100 text-purple-800'
                               : u.role === 'teacher'
                               ? 'bg-blue-100 text-blue-800'
                               : 'bg-emerald-100 text-emerald-800'
                           }`}
                         >
+                          {u.role === 'developer' && <Code2 className="w-3 h-3 text-violet-700" />}
                           {u.role === 'admin' && <Shield className="w-3 h-3" />}
                           {u.role === 'teacher' && <BookOpen className="w-3 h-3" />}
                           {u.role === 'student' && <GraduationCap className="w-3 h-3" />}
@@ -497,12 +546,18 @@ export const AdminUsersPage: React.FC = () => {
                       <td className="py-3.5 px-4">
                         <span
                           className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            u.status === 'active'
+                            u.role === 'developer'
+                              ? 'bg-violet-100 text-violet-800 border border-violet-200'
+                              : u.status === 'active'
                               ? 'bg-emerald-100 text-emerald-800'
                               : 'bg-rose-100 text-rose-800'
                           }`}
                         >
-                          {u.status === 'active' ? (
+                          {u.role === 'developer' ? (
+                            <>
+                              <CheckCircle2 className="w-3 h-3 text-violet-600" /> Permanent Active
+                            </>
+                          ) : u.status === 'active' ? (
                             <>
                               <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Active
                             </>
@@ -516,48 +571,60 @@ export const AdminUsersPage: React.FC = () => {
 
                       {/* Actions */}
                       <td className="py-3.5 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => toggleStatus(u.uid)}
-                            className={`px-2 py-1 rounded text-[11px] font-semibold transition-colors border cursor-pointer ${
-                              u.status === 'active'
-                                ? 'border-rose-200 text-rose-700 hover:bg-rose-50'
-                                : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'
-                            }`}
-                          >
-                            {u.status === 'active' ? 'Deactivate' : 'Activate'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setResetTargetUser(u);
-                              setAdminNewPassword('Eduform123!');
-                              setShowAdminResetPw(false);
-                            }}
-                            className="p-1.5 rounded text-amber-600 hover:text-amber-800 hover:bg-amber-50 transition-colors cursor-pointer"
-                            title="Reset password for this user"
-                          >
-                            <KeyRound className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => openEditModal(u)}
-                            className="p-1.5 rounded text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors cursor-pointer"
-                            title="Edit user assignments & password"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDeleteTarget(u)}
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200 transition-colors cursor-pointer"
-                            title="Remove user account"
-                          >
-                            <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                            <span>Remove</span>
-                          </button>
-                        </div>
+                        {u.role === 'developer' || u.uid === 'dev-system-superuser' ? (
+                          <div className="flex items-center justify-end">
+                            <span
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-violet-50 text-violet-700 border border-violet-200 shadow-2xs select-none"
+                              title="This developer master account is protected and cannot be edited or removed by any other user."
+                            >
+                              <ShieldAlert className="w-3.5 h-3.5 text-violet-600" />
+                              <span>Protected Master</span>
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => toggleStatus(u.uid)}
+                              className={`px-2 py-1 rounded text-[11px] font-semibold transition-colors border cursor-pointer ${
+                                u.status === 'active'
+                                  ? 'border-rose-200 text-rose-700 hover:bg-rose-50'
+                                  : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'
+                              }`}
+                            >
+                              {u.status === 'active' ? 'Deactivate' : 'Activate'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setResetTargetUser(u);
+                                setAdminNewPassword('Eduform123!');
+                                setShowAdminResetPw(false);
+                              }}
+                              className="p-1.5 rounded text-amber-600 hover:text-amber-800 hover:bg-amber-50 transition-colors cursor-pointer"
+                              title="Reset password for this user"
+                            >
+                              <KeyRound className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(u)}
+                              className="p-1.5 rounded text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors cursor-pointer"
+                              title="Edit user assignments & password"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDeleteTarget(u)}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200 transition-colors cursor-pointer"
+                              title="Remove user account"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                              <span>Remove</span>
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );

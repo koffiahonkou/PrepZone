@@ -1,6 +1,5 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 import { AuthProvider } from './context/AuthContext';
 import { ColorModeProvider } from './context/ColorModeContext';
@@ -27,19 +26,9 @@ import { StudentAskTeacherPage } from './pages/student/StudentAskTeacherPage';
 import { TeacherInquiriesPage } from './pages/teacher/TeacherInquiriesPage';
 import { StagePlaceholderPage } from './pages/common/StagePlaceholderPage';
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      refetchOnWindowFocus: false,
-      retry: 1,
-    },
-  },
-});
-
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <ColorModeProvider>
+    <ColorModeProvider>
         <AuthProvider>
           <BrowserRouter>
             <Routes>
@@ -142,7 +131,6 @@ export default function App() {
         <Toaster position="top-right" richColors closeButton />
       </AuthProvider>
     </ColorModeProvider>
-  </QueryClientProvider>
   );
 }
 

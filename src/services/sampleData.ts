@@ -59,7 +59,25 @@ export const INITIAL_CLASSES: AcademicClass[] = [
   },
 ];
 
+export const DEVELOPER_USER: UserProfile = {
+  uid: 'dev-system-superuser',
+  username: 'developer',
+  usernameLower: 'developer',
+  authEmail: 'developer@eduform.local',
+  fullName: 'System Developer (Superuser)',
+  role: 'developer',
+  status: 'active',
+  classIds: ['class-jss1-a', 'class-jss1-b', 'class-jss2-a', 'class-ss1-sci'],
+  levelIds: ['level-basic', 'level-jhs', 'level-shs'],
+  subjectIds: ['subj-mth', 'subj-eng', 'subj-sci', 'subj-tec', 'subj-sos', 'subj-csc'],
+  password: 'Eduform123!',
+  createdBy: 'system',
+  createdAt: '2026-01-01T00:00:00Z',
+  lastLoginAt: '2026-11-04T20:00:00Z',
+};
+
 export const INITIAL_USERS: UserProfile[] = [
+  DEVELOPER_USER,
   {
     uid: 'demo-admin-uid',
     username: 'admin',

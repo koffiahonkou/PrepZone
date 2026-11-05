@@ -23,6 +23,7 @@ import {
   Moon,
   MessageSquareQuote,
   KeyRound,
+  Code2,
 } from 'lucide-react';
 import { useAuth } from '@/src/context/AuthContext';
 import { useColorMode } from '@/src/context/ColorModeContext';
@@ -344,21 +345,51 @@ export const AppLayout: React.FC = () => {
                   {profile?.fullName || 'User'}
                 </p>
                 <p className="text-[10px] text-slate-600 font-medium capitalize">
-                  {profile?.role || 'Guest'}
+                  {profile?.role === 'developer' ? 'Developer (Superuser)' : profile?.role || 'Guest'}
                 </p>
               </div>
-              <div className="w-8 h-8 rounded-full bg-[#0F2A4A] text-white flex items-center justify-center text-xs font-bold ring-2 ring-emerald-500/30">
-                {profile?.fullName ? profile.fullName.charAt(0).toUpperCase() : 'U'}
+              <div
+                className={`w-8 h-8 rounded-full text-white flex items-center justify-center text-xs font-bold ring-2 ${
+                  profile?.role === 'developer'
+                    ? 'bg-gradient-to-tr from-violet-700 to-indigo-600 ring-violet-500/40'
+                    : 'bg-[#0F2A4A] ring-emerald-500/30'
+                }`}
+              >
+                {profile?.role === 'developer' ? (
+                  <Code2 className="w-4 h-4 text-violet-100" />
+                ) : profile?.fullName ? (
+                  profile.fullName.charAt(0).toUpperCase()
+                ) : (
+                  'U'
+                )}
               </div>
             </button>
 
             {profileDropdownOpen && (
               <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-50 animate-in fade-in zoom-in-95">
                 <div className="px-4 py-2.5 border-b border-slate-100">
-                  <p className="text-xs font-bold text-[#0F2A4A] truncate">{profile?.fullName}</p>
+                  <div className="flex items-center justify-between gap-1">
+                    <p className="text-xs font-bold text-[#0F2A4A] truncate">{profile?.fullName}</p>
+                    {profile?.role === 'developer' && (
+                      <span className="px-1.5 py-0.2 rounded text-[9px] font-extrabold bg-violet-100 text-violet-800 border border-violet-200 uppercase tracking-wider">
+                        Superuser
+                      </span>
+                    )}
+                  </div>
                   <p className="text-[11px] text-slate-600 font-mono truncate">@{profile?.username}</p>
-                  <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded text-[10px] font-semibold uppercase bg-emerald-50 text-emerald-700">
-                    <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Active Account
+                  <span
+                    className={`inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                      profile?.role === 'developer'
+                        ? 'bg-violet-50 text-violet-700 border border-violet-100'
+                        : 'bg-emerald-50 text-emerald-700'
+                    }`}
+                  >
+                    <CheckCircle2
+                      className={`w-3 h-3 ${
+                        profile?.role === 'developer' ? 'text-violet-600' : 'text-emerald-600'
+                      }`}
+                    />{' '}
+                    {profile?.role === 'developer' ? 'Protected Master Access' : 'Active Account'}
                   </span>
                 </div>
 
@@ -438,9 +469,13 @@ export const AppLayout: React.FC = () => {
         {/* Desktop Sidebar */}
         <aside className="hidden md:flex flex-col w-64 bg-[#0F2A4A] text-slate-300 shrink-0">
           <div className="p-4 border-b border-slate-700/60 flex items-center gap-2">
-            <Shield className="w-4 h-4 text-emerald-400" />
+            {profile?.role === 'developer' ? (
+              <Code2 className="w-4 h-4 text-violet-400" />
+            ) : (
+              <Shield className="w-4 h-4 text-emerald-400" />
+            )}
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-              {isAdmin ? 'Staff Navigation' : 'My Classes & Learning'}
+              {profile?.role === 'developer' ? 'Superuser Full Access' : isAdmin ? 'Staff Navigation' : 'My Classes & Learning'}
             </span>
           </div>
 
@@ -481,15 +516,27 @@ export const AppLayout: React.FC = () => {
           {/* User Account & Direct Sign Out in Sidebar Footer */}
           <div className="p-3 border-t border-slate-700/60 bg-[#0B213B]/80 space-y-2.5">
             <div className="flex items-center gap-2.5 px-1 py-1">
-              <div className="w-8 h-8 rounded-full bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 flex items-center justify-center text-xs font-bold shrink-0">
-                {profile?.fullName ? profile.fullName.charAt(0).toUpperCase() : 'U'}
+              <div
+                className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                  profile?.role === 'developer'
+                    ? 'bg-violet-600/30 border border-violet-500/50 text-violet-300'
+                    : 'bg-emerald-600/30 border border-emerald-500/40 text-emerald-300'
+                }`}
+              >
+                {profile?.role === 'developer' ? (
+                  <Code2 className="w-4 h-4" />
+                ) : profile?.fullName ? (
+                  profile.fullName.charAt(0).toUpperCase()
+                ) : (
+                  'U'
+                )}
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-bold text-white truncate leading-tight">
                   {profile?.fullName || 'User'}
                 </p>
                 <p className="text-[10px] text-slate-400 font-medium capitalize truncate">
-                  {profile?.role || 'Guest'} • @{profile?.username}
+                  {profile?.role === 'developer' ? 'Developer (Superuser)' : profile?.role || 'Guest'} • @{profile?.username}
                 </p>
               </div>
             </div>

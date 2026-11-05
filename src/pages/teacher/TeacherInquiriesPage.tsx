@@ -32,11 +32,18 @@ import {
   FolderArchive,
   Inbox,
   Eye,
+  PanelRight,
+  Maximize2,
+  Minimize2,
+  Eraser,
+  Reply,
 } from 'lucide-react';
 import { useAuth } from '@/src/context/AuthContext';
 import { dataStore } from '@/src/services/dataStore';
 import { StudentInquiry, InquiryStatus, UserProfile, CannedResponse } from '@/src/types';
 import { CannedResponsesModal } from '@/src/components/inquiries/CannedResponsesModal';
+import { RichTextEditor } from '@/src/components/common/RichTextEditor';
+import DOMPurify from 'dompurify';
 import { toast } from 'sonner';
 
 export const TeacherInquiriesPage: React.FC = () => {
@@ -62,6 +69,7 @@ export const TeacherInquiriesPage: React.FC = () => {
   const [activeInquiryId, setActiveInquiryId] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
   const [isSubmittingReply, setIsSubmittingReply] = useState(false);
+  const [displayMode, setDisplayMode] = useState<'drawer' | 'modal'>('drawer');
 
   // Canned Responses Library modal state
   const [isCannedModalOpen, setIsCannedModalOpen] = useState(false);
@@ -133,20 +141,31 @@ export const TeacherInquiriesPage: React.FC = () => {
     (i) => i.status === 'pending' && !dataStore.isInquiryRead(i.id, profile?.uid)
   ).length;
 
-  // Send reply handler (supports optional resolution or archive)
+  // Helper to check if rich text HTML is blank
+  const isHtmlContentEmpty = (html: string): boolean => {
+    if (!html) return true;
+    const stripped = html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
+    return stripped.length === 0 && !html.includes('<img');
+  };
+
+  // Send reply handler (supports rich text and optional resolution or archive)
   const handleSendReply = (
     e: React.FormEvent,
     andAction: 'none' | 'resolve' | 'archive' = 'none'
   ) => {
     e.preventDefault();
-    if (!activeInquiry || !replyText.trim()) return;
+    if (!activeInquiry || isHtmlContentEmpty(replyText)) {
+      toast.error('Please compose an educational explanation before delivering your reply.');
+      return;
+    }
 
     setIsSubmittingReply(true);
+    const sanitizedHtml = DOMPurify.sanitize(replyText.trim());
     const updated = dataStore.addInquiryReply(activeInquiry.id, {
       authorId: profile?.uid || 'teacher',
       authorName: profile?.fullName || 'Teacher',
       authorRole: (profile?.role as any) || 'teacher',
-      content: replyText.trim(),
+      content: sanitizedHtml,
     });
 
     if (updated) {
@@ -178,7 +197,31 @@ export const TeacherInquiriesPage: React.FC = () => {
       subjectName: activeInquiry.subjectName,
       className: activeInquiry.className,
     });
-    setReplyText((prev) => (prev ? `${prev}\n\n${filled}` : filled));
+    // Format text into HTML paragraphs for the rich text editor
+    const paragraphs = filled
+      .split(/\n\s*\n/)
+      .map((p) => `<p>${p.replace(/\n/g, '<br/>')}</p>`)
+      .join('');
+
+    setReplyText((prev) => {
+      if (!prev || isHtmlContentEmpty(prev)) return paragraphs;
+      return `${prev}${paragraphs}`;
+    });
+    toast.success('Inserted template into editor');
+  };
+
+  const handleSelectCannedResponse = (text: string, mode: 'replace' | 'append') => {
+    const paragraphs = text
+      .split(/\n\s*\n/)
+      .map((p) => `<p>${p.replace(/\n/g, '<br/>')}</p>`)
+      .join('');
+
+    if (mode === 'replace' || !replyText || isHtmlContentEmpty(replyText)) {
+      setReplyText(paragraphs);
+    } else {
+      setReplyText((prev) => `${prev}${paragraphs}`);
+    }
+    toast.success('Applied response from library!');
   };
 
   const handleResolve = (inqId: string) => {
@@ -206,8 +249,9 @@ export const TeacherInquiriesPage: React.FC = () => {
   };
 
   const handleSaveCurrentDraftAsCanned = () => {
-    if (!replyText.trim() || !activeInquiry) return;
-    const cleanSnippet = replyText.trim().slice(0, 36);
+    if (!replyText.trim() || isHtmlContentEmpty(replyText) || !activeInquiry) return;
+    const plainText = replyText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    const cleanSnippet = plainText.slice(0, 36);
     const customTitle = `${activeInquiry.subjectCode}: ${cleanSnippet}...`;
     dataStore.saveCannedResponse({
       id: `canned-custom-${Date.now()}`,
@@ -221,7 +265,7 @@ export const TeacherInquiriesPage: React.FC = () => {
       createdAt: new Date().toISOString(),
     });
     setCannedResponses(dataStore.getCannedResponses());
-    toast.success('Draft saved as reusable response in your library!');
+    toast.success('Rich text draft saved as reusable response in your library!');
   };
 
   return (
@@ -610,240 +654,539 @@ export const TeacherInquiriesPage: React.FC = () => {
         )}
       </div>
 
-      {/* Interactive Teacher Answer / Dialogue Modal */}
+      {/* Interactive Teacher Answer / Dialogue Drawer or Modal */}
       {activeInquiry && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 my-8 max-h-[92vh] flex flex-col">
-            {/* Modal Header */}
-            <div className="pb-3 border-b border-slate-100 flex items-start justify-between gap-3">
-              <div>
-                <div className="flex flex-wrap items-center gap-2 mb-1">
-                  <span className="font-bold text-xs text-slate-900">{activeInquiry.studentName}</span>
-                  <span className="px-2 py-0.2 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">
-                    {activeInquiry.className}
-                  </span>
-                  <span className="px-2 py-0.2 rounded text-[10px] font-bold bg-[#0F2A4A]/5 text-[#0F2A4A] border border-[#0F2A4A]/10">
-                    {activeInquiry.subjectCode} &bull; {activeInquiry.subjectName}
-                  </span>
-                  {activeInquiry.status === 'pending' ? (
-                    <span className="px-2 py-0.2 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
-                      Needs Response
-                    </span>
-                  ) : activeInquiry.status === 'answered' ? (
-                    <span className="px-2 py-0.2 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                      Answered
-                    </span>
-                  ) : activeInquiry.status === 'resolved' ? (
-                    <span className="px-2 py-0.2 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">
-                      Resolved
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.2 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800">
-                      Archived
-                    </span>
-                  )}
+        <div className="fixed inset-0 z-50 overflow-hidden">
+          {/* Backdrop Overlay */}
+          <div
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity animate-in fade-in duration-200"
+            onClick={() => setActiveInquiryId(null)}
+          />
+
+          {displayMode === 'drawer' ? (
+            /* SLIDE-OVER DRAWER MODE */
+            <div className="fixed inset-y-0 right-0 z-50 flex max-w-full pl-10">
+              <div
+                className="w-screen max-w-2xl sm:max-w-3xl bg-white shadow-2xl flex flex-col border-l border-slate-200 animate-in slide-in-from-right duration-250"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Drawer Header */}
+                <div className="px-5 py-4 border-b border-slate-200 bg-slate-50/80 flex items-center justify-between gap-3 shrink-0">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-full bg-[#0F2A4A]/10 text-[#0F2A4A] font-bold text-sm flex items-center justify-center shrink-0 border border-[#0F2A4A]/20 shadow-2xs">
+                      {activeInquiry.studentName.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-bold text-sm text-slate-900 truncate">
+                          {activeInquiry.studentName}
+                        </span>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">
+                          {activeInquiry.className}
+                        </span>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#0F2A4A]/5 text-[#0F2A4A] border border-[#0F2A4A]/10">
+                          {activeInquiry.subjectCode} &bull; {activeInquiry.subjectName}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-500">
+                        <span>Submitted {new Date(activeInquiry.createdAt).toLocaleDateString()} at {new Date(activeInquiry.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setDisplayMode('modal')}
+                      className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-200/80 transition-colors cursor-pointer"
+                      title="Switch to centered dialog view"
+                    >
+                      <Maximize2 className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveInquiryId(null)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/80 transition-colors cursor-pointer"
+                      title="Close drawer"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
                 </div>
 
-                <h3 className="font-bold text-base text-slate-900">{activeInquiry.title}</h3>
-                <p className="text-[11px] text-slate-400 mt-0.5">
-                  Submitted on {new Date(activeInquiry.createdAt).toLocaleDateString()} at{' '}
-                  {new Date(activeInquiry.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setActiveInquiryId(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Conversation Flow */}
-            <div className="flex-1 overflow-y-auto py-4 space-y-3.5 pr-1">
-              {activeInquiry.messages.map((msg) => {
-                const isStudent = msg.authorRole === 'student';
-                return (
-                  <div
-                    key={msg.id}
-                    className={`flex flex-col ${
-                      !isStudent ? 'items-end' : 'items-start'
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5 mb-1 px-1 text-[11px] text-slate-400">
-                      <span className="font-bold text-slate-700">{msg.authorName}</span>
-                      {isStudent ? (
-                        <span className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-slate-100 text-slate-600">
-                          Student
+                {/* Drawer Body - Scrollable Conversation & Context */}
+                <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5">
+                  {/* Student Question Card */}
+                  <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/60 shadow-2xs space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="p-1.5 rounded-md bg-amber-100 text-amber-800 shrink-0">
+                          <MessageCircleQuestion className="w-4 h-4" />
                         </span>
+                        <h4 className="font-bold text-sm text-slate-900 truncate">
+                          {activeInquiry.title}
+                        </h4>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {activeInquiry.priority === 'urgent' && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200 animate-pulse">
+                            Urgent Priority
+                          </span>
+                        )}
+                        {activeInquiry.status === 'pending' ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                            Awaiting Response
+                          </span>
+                        ) : activeInquiry.status === 'answered' ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            Answered
+                          </span>
+                        ) : activeInquiry.status === 'resolved' ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                            Resolved
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
+                            Archived
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-slate-700 leading-relaxed pt-1 whitespace-pre-wrap font-sans">
+                      {activeInquiry.question}
+                    </p>
+                  </div>
+
+                  {/* Message Thread History */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between text-xs font-bold text-slate-500 uppercase tracking-wider pb-1 border-b border-slate-100">
+                      <span>Thread History ({activeInquiry.messages.length} message{activeInquiry.messages.length === 1 ? '' : 's'})</span>
+                    </div>
+
+                    <div className="space-y-3.5 pt-1">
+                      {activeInquiry.messages.map((msg) => {
+                        const isStudent = msg.authorRole === 'student';
+                        const hasHtml = /<[a-z][\s\S]*>/i.test(msg.content);
+
+                        return (
+                          <div
+                            key={msg.id}
+                            className={`flex flex-col ${
+                              !isStudent ? 'items-end' : 'items-start'
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5 mb-1 px-1 text-[11px] text-slate-400">
+                              <span className="font-bold text-slate-700">{msg.authorName}</span>
+                              {isStudent ? (
+                                <span className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-slate-100 text-slate-600">
+                                  Student
+                                </span>
+                              ) : (
+                                <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                  Subject Teacher
+                                </span>
+                              )}
+                              <span>&bull;</span>
+                              <span>{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                            </div>
+
+                            <div
+                              className={`p-4 rounded-2xl max-w-xl text-xs leading-relaxed shadow-2xs ${
+                                !isStudent
+                                  ? 'bg-[#0F2A4A] text-white rounded-tr-xs'
+                                  : 'bg-slate-100 text-slate-800 rounded-tl-xs border border-slate-200/60'
+                              }`}
+                            >
+                              {hasHtml ? (
+                                <div
+                                  className={`rich-text-content space-y-1.5 leading-relaxed ${
+                                    !isStudent ? 'prose-invert text-white' : 'text-slate-800'
+                                  }`}
+                                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(msg.content) }}
+                                />
+                              ) : (
+                                <p className="whitespace-pre-wrap">{msg.content}</p>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Drawer Footer - Rich Text Direct Reply Composer */}
+                <div className="p-4 sm:p-5 border-t border-slate-200 bg-slate-50/90 shrink-0 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                      <Reply className="w-4 h-4 text-indigo-600" />
+                      <span>Compose Direct Reply</span>
+                      <span className="text-[11px] font-normal text-slate-500">
+                        (as {profile?.fullName || 'Teacher'})
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsCannedModalOpen(true)}
+                      className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg border border-indigo-200 shadow-2xs transition-colors cursor-pointer"
+                    >
+                      <BookMarked className="w-3.5 h-3.5" />
+                      <span>Canned Library ({cannedResponses.length})</span>
+                    </button>
+                  </div>
+
+                  {/* Fast Starter Chips */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                      Quick Insert:
+                    </span>
+                    {[
+                      { label: 'Worked Steps', tpl: `Hi {name}!\n\nHere is how to solve this step-by-step:\n1. First identify the variables\n2. Apply the relevant formula\n3. Simplify your result.` },
+                      { label: 'Curriculum Reference', tpl: `Hello {name},\n\nPlease review Section 2 of our lesson notes for {subject}. The worked examples directly explain this method.` },
+                      { label: 'Office Hours & Practice', tpl: `Hi {name},\n\nGreat attempt! Let's review this together during tomorrow's tutorial or office hours. In the meantime, try practice problem #3.` },
+                    ].map((item, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => handleApplyTemplate(item.tpl)}
+                        className="px-2 py-0.5 rounded text-[11px] font-medium bg-white hover:bg-slate-200 border border-slate-200 text-slate-700 shadow-2xs cursor-pointer transition-colors"
+                      >
+                        +{item.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Rich Text Editor Component */}
+                  <div className="bg-white rounded-xl shadow-2xs border border-slate-200">
+                    <RichTextEditor
+                      placeholder={`Compose your detailed explanation for ${activeInquiry.studentName}. Format steps with bullet points, bold key terms, or quote formulas...`}
+                      value={replyText}
+                      onChange={setReplyText}
+                      minHeight="140px"
+                    />
+                  </div>
+
+                  {/* Action Bar */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                    <div className="flex items-center gap-1.5">
+                      {!isHtmlContentEmpty(replyText) && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={handleSaveCurrentDraftAsCanned}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 cursor-pointer transition-colors shadow-2xs"
+                            title="Save this rich reply as a reusable template in your library"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Save as Template</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setReplyText('')}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-200 border border-slate-200 cursor-pointer transition-colors"
+                            title="Clear current draft"
+                          >
+                            <Eraser className="w-3.5 h-3.5" />
+                            <span>Clear</span>
+                          </button>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {!isHtmlContentEmpty(replyText) && (
+                        <>
+                          <button
+                            type="button"
+                            disabled={isSubmittingReply}
+                            onClick={(e) => handleSendReply(e, 'resolve')}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold cursor-pointer disabled:opacity-40 shadow-2xs transition-colors"
+                            title="Send reply and immediately mark question as resolved"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Send &amp; Resolve</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isSubmittingReply}
+                            onClick={(e) => handleSendReply(e, 'archive')}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-xs font-semibold cursor-pointer disabled:opacity-40 shadow-2xs transition-colors"
+                            title="Send reply and move inquiry to archive"
+                          >
+                            <Archive className="w-3.5 h-3.5" />
+                            <span>Send &amp; Archive</span>
+                          </button>
+                        </>
+                      )}
+
+                      <button
+                        type="button"
+                        disabled={isSubmittingReply || isHtmlContentEmpty(replyText)}
+                        onClick={(e) => handleSendReply(e, 'none')}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#0F2A4A] hover:bg-[#163c68] text-white text-xs font-bold cursor-pointer disabled:opacity-40 shadow-xs transition-colors"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>{isSubmittingReply ? 'Delivering...' : 'Send Direct Reply'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Bottom Quick Status Controls */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/80 text-[11px] text-slate-500">
+                    <span>Manage Status Without Replying:</span>
+                    <div className="flex items-center gap-1.5">
+                      {activeInquiry.status !== 'resolved' ? (
+                        <button
+                          type="button"
+                          onClick={() => handleResolve(activeInquiry.id)}
+                          className="px-2 py-1 rounded-md text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 font-semibold cursor-pointer transition-colors"
+                        >
+                          Mark Resolved
+                        </button>
                       ) : (
-                        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                          Subject Teacher
+                        <button
+                          type="button"
+                          onClick={() => handleReopen(activeInquiry.id)}
+                          className="px-2 py-1 rounded-md text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-200 font-medium cursor-pointer transition-colors"
+                        >
+                          Reopen Pending
+                        </button>
+                      )}
+
+                      {activeInquiry.status !== 'archived' ? (
+                        <button
+                          type="button"
+                          onClick={() => handleArchive(activeInquiry.id)}
+                          className="px-2 py-1 rounded-md text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-200 font-medium cursor-pointer transition-colors"
+                        >
+                          Archive
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleUnarchive(activeInquiry.id)}
+                          className="px-2 py-1 rounded-md text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 font-semibold cursor-pointer transition-colors"
+                        >
+                          Restore Active
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* CENTERED MODAL DIALOG MODE */
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto pointer-events-none">
+              <div
+                className="w-full max-w-3xl bg-white rounded-2xl shadow-2xl border border-slate-200 max-h-[92vh] flex flex-col my-auto pointer-events-auto animate-in zoom-in-95 duration-200"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Modal Header */}
+                <div className="px-6 py-4 border-b border-slate-200 bg-slate-50/80 flex items-center justify-between gap-3 shrink-0 rounded-t-2xl">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-full bg-[#0F2A4A]/10 text-[#0F2A4A] font-bold text-sm flex items-center justify-center shrink-0 border border-[#0F2A4A]/20">
+                      {activeInquiry.studentName.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-bold text-sm text-slate-900">{activeInquiry.studentName}</span>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">
+                          {activeInquiry.className}
+                        </span>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#0F2A4A]/5 text-[#0F2A4A] border border-[#0F2A4A]/10">
+                          {activeInquiry.subjectCode} &bull; {activeInquiry.subjectName}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Submitted on {new Date(activeInquiry.createdAt).toLocaleDateString()} at{' '}
+                        {new Date(activeInquiry.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setDisplayMode('drawer')}
+                      className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-200/80 transition-colors cursor-pointer"
+                      title="Switch to slide-over drawer view"
+                    >
+                      <PanelRight className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveInquiryId(null)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/80 transition-colors cursor-pointer"
+                      title="Close dialog"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Modal Body */}
+                <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                  {/* Student Question Card */}
+                  <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/60 shadow-2xs space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <h4 className="font-bold text-sm text-slate-900">{activeInquiry.title}</h4>
+                      {activeInquiry.priority === 'urgent' && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200 animate-pulse">
+                          Urgent Priority
                         </span>
                       )}
-                      <span>&bull;</span>
-                      <span>{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+                    <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap">
+                      {activeInquiry.question}
+                    </p>
+                  </div>
+
+                  {/* Messages Flow */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between text-xs font-bold text-slate-500 uppercase tracking-wider pb-1 border-b border-slate-100">
+                      <span>Thread History ({activeInquiry.messages.length} message{activeInquiry.messages.length === 1 ? '' : 's'})</span>
                     </div>
 
-                    <div
-                      className={`p-3.5 rounded-2xl max-w-xl text-xs leading-relaxed whitespace-pre-wrap ${
-                        !isStudent
-                          ? 'bg-[#0F2A4A] text-white rounded-tr-xs shadow-2xs'
-                          : 'bg-slate-100 text-slate-800 rounded-tl-xs shadow-2xs'
-                      }`}
-                    >
-                      {msg.content}
+                    <div className="space-y-3 pt-1">
+                      {activeInquiry.messages.map((msg) => {
+                        const isStudent = msg.authorRole === 'student';
+                        const hasHtml = /<[a-z][\s\S]*>/i.test(msg.content);
+
+                        return (
+                          <div
+                            key={msg.id}
+                            className={`flex flex-col ${
+                              !isStudent ? 'items-end' : 'items-start'
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5 mb-1 px-1 text-[11px] text-slate-400">
+                              <span className="font-bold text-slate-700">{msg.authorName}</span>
+                              {isStudent ? (
+                                <span className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-slate-100 text-slate-600">
+                                  Student
+                                </span>
+                              ) : (
+                                <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                  Subject Teacher
+                                </span>
+                              )}
+                              <span>&bull;</span>
+                              <span>{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                            </div>
+
+                            <div
+                              className={`p-4 rounded-2xl max-w-xl text-xs leading-relaxed shadow-2xs ${
+                                !isStudent
+                                  ? 'bg-[#0F2A4A] text-white rounded-tr-xs'
+                                  : 'bg-slate-100 text-slate-800 rounded-tl-xs border border-slate-200/60'
+                              }`}
+                            >
+                              {hasHtml ? (
+                                <div
+                                  className={`rich-text-content space-y-1.5 leading-relaxed ${
+                                    !isStudent ? 'prose-invert text-white' : 'text-slate-800'
+                                  }`}
+                                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(msg.content) }}
+                                />
+                              ) : (
+                                <p className="whitespace-pre-wrap">{msg.content}</p>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
-                );
-              })}
-            </div>
-
-            {/* Response Section */}
-            <div className="pt-3 border-t border-slate-100 space-y-3">
-              {/* Canned Response Library Trigger & Quick Starters */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 text-[11px] text-slate-600 font-semibold">
-                    <Lightbulb className="w-3.5 h-3.5 text-amber-500" /> Response Starters:
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setIsCannedModalOpen(true)}
-                    className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-md border border-indigo-200 transition-colors cursor-pointer"
-                  >
-                    <BookMarked className="w-3.5 h-3.5" />
-                    <span>Canned Responses Library ({cannedResponses.length})</span>
-                  </button>
                 </div>
 
-                <div className="flex flex-wrap gap-1.5">
-                  {[
-                    `Hi {name}! Excellent question on this topic. Here is the principle:`,
-                    `Hello {name}, to solve this, remember to check Section 2 of our lesson notes:`,
-                    `Hi {name}, let's work through this step by step:`,
-                  ].map((tpl, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => handleApplyTemplate(tpl)}
-                      className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-medium cursor-pointer transition-colors"
-                    >
-                      +{tpl.slice(0, 28)}...
-                    </button>
-                  ))}
-                </div>
-              </div>
+                {/* Modal Footer - Rich Text Composer */}
+                <div className="p-5 border-t border-slate-200 bg-slate-50/90 shrink-0 space-y-3 rounded-b-2xl">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                      <Reply className="w-4 h-4 text-indigo-600" />
+                      <span>Compose Direct Reply</span>
+                      <span className="text-[11px] font-normal text-slate-500">
+                        (as {profile?.fullName || 'Teacher'})
+                      </span>
+                    </div>
 
-              {/* Reply Form */}
-              <form onSubmit={(e) => handleSendReply(e, 'none')} className="space-y-2">
-                <div className="relative">
-                  <textarea
-                    rows={3}
-                    placeholder={`Write your educational explanation for ${activeInquiry.studentName}...`}
-                    value={replyText}
-                    onChange={(e) => setReplyText(e.target.value)}
-                    className="w-full p-3 rounded-lg border border-slate-200 text-xs bg-white text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-[#0F2A4A]/20 leading-relaxed font-sans"
-                  />
-                  {replyText.trim() && (
                     <button
                       type="button"
-                      onClick={handleSaveCurrentDraftAsCanned}
-                      className="absolute right-2.5 bottom-2.5 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 cursor-pointer shadow-2xs"
-                      title="Save this reply to Canned Responses Library for future students"
+                      onClick={() => setIsCannedModalOpen(true)}
+                      className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg border border-indigo-200 shadow-2xs transition-colors cursor-pointer"
                     >
-                      <Plus className="w-3 h-3" />
-                      <span>Save as Template</span>
+                      <BookMarked className="w-3.5 h-3.5" />
+                      <span>Canned Library ({cannedResponses.length})</span>
                     </button>
-                  )}
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                  <div className="flex items-center gap-1.5">
-                    {activeInquiry.status !== 'resolved' ? (
-                      <button
-                        type="button"
-                        onClick={() => handleResolve(activeInquiry.id)}
-                        className="text-xs text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1.5 rounded-lg font-semibold flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
-                        title="Mark as resolved and decrement pending counter"
-                      >
-                        <Check className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Mark Resolved</span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => handleReopen(activeInquiry.id)}
-                        className="text-xs text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-200 px-2.5 py-1.5 rounded-lg font-medium flex items-center gap-1 cursor-pointer transition-colors"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-                        <span>Reopen</span>
-                      </button>
-                    )}
-
-                    {activeInquiry.status !== 'archived' ? (
-                      <button
-                        type="button"
-                        onClick={() => handleArchive(activeInquiry.id)}
-                        className="text-xs text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-200 px-2.5 py-1.5 rounded-lg font-medium flex items-center gap-1 cursor-pointer transition-colors"
-                        title="Archive inquiry and remove from active counter"
-                      >
-                        <Archive className="w-3.5 h-3.5 text-slate-500" />
-                        <span>Archive</span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => handleUnarchive(activeInquiry.id)}
-                        className="text-xs text-purple-700 hover:text-purple-800 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-2.5 py-1.5 rounded-lg font-semibold flex items-center gap-1 cursor-pointer transition-colors"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5 text-purple-600" />
-                        <span>Restore Active</span>
-                      </button>
-                    )}
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    {replyText.trim() && (
-                      <>
+                  {/* Rich Text Editor */}
+                  <div className="bg-white rounded-xl shadow-2xs border border-slate-200">
+                    <RichTextEditor
+                      placeholder={`Compose your educational explanation for ${activeInquiry.studentName}...`}
+                      value={replyText}
+                      onChange={setReplyText}
+                      minHeight="140px"
+                    />
+                  </div>
+
+                  {/* Modal Action Buttons */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                    <div className="flex items-center gap-1.5">
+                      {!isHtmlContentEmpty(replyText) && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={handleSaveCurrentDraftAsCanned}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 cursor-pointer shadow-2xs"
+                            title="Save as template"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Save Template</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setReplyText('')}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-200 border border-slate-200 cursor-pointer"
+                          >
+                            <Eraser className="w-3.5 h-3.5" />
+                            <span>Clear</span>
+                          </button>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {!isHtmlContentEmpty(replyText) && (
                         <button
                           type="button"
                           disabled={isSubmittingReply}
                           onClick={(e) => handleSendReply(e, 'resolve')}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold cursor-pointer disabled:opacity-40 shadow-xs transition-colors"
-                          title="Send explanation and immediately mark inquiry as resolved"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold cursor-pointer disabled:opacity-40 shadow-2xs transition-colors"
                         >
                           <Check className="w-3.5 h-3.5" />
                           <span>Send &amp; Resolve</span>
                         </button>
-                        <button
-                          type="button"
-                          disabled={isSubmittingReply}
-                          onClick={(e) => handleSendReply(e, 'archive')}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-xs font-semibold cursor-pointer disabled:opacity-40 shadow-xs transition-colors"
-                          title="Send explanation and move inquiry to archive"
-                        >
-                          <Archive className="w-3.5 h-3.5" />
-                          <span>Send &amp; Archive</span>
-                        </button>
-                      </>
-                    )}
-
-                    <button
-                      type="submit"
-                      disabled={isSubmittingReply || !replyText.trim()}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#0F2A4A] hover:bg-[#163c68] text-white text-xs font-semibold cursor-pointer disabled:opacity-40 shadow-xs transition-colors"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                      <span>{isSubmittingReply ? 'Delivering...' : 'Send'}</span>
-                    </button>
+                      )}
+                      <button
+                        type="button"
+                        disabled={isSubmittingReply || isHtmlContentEmpty(replyText)}
+                        onClick={(e) => handleSendReply(e, 'none')}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#0F2A4A] hover:bg-[#163c68] text-white text-xs font-bold cursor-pointer disabled:opacity-40 shadow-xs transition-colors"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>{isSubmittingReply ? 'Delivering...' : 'Send Direct Reply'}</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </form>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -852,9 +1195,7 @@ export const TeacherInquiriesPage: React.FC = () => {
         isOpen={isCannedModalOpen}
         onClose={() => setIsCannedModalOpen(false)}
         onSelectResponse={(text, mode) => {
-          setReplyText((prev) =>
-            mode === 'append' && prev ? `${prev}\n\n${text}` : text
-          );
+          handleSelectCannedResponse(text, mode);
         }}
         studentName={activeInquiry?.studentName || 'Student'}
         teacherName={profile?.fullName || 'Teacher'}
