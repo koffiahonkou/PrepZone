@@ -421,10 +421,14 @@ export const AppLayout: React.FC = () => {
                       setProfileDropdownOpen(false);
                       setIsChangePasswordOpen(true);
                     }}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                    className={`w-full flex items-center gap-2 px-4 py-2 text-xs transition-colors text-left cursor-pointer ${
+                      profile?.role === 'developer'
+                        ? 'bg-violet-50/80 text-violet-900 font-semibold hover:bg-violet-100/90'
+                        : 'text-slate-700 hover:bg-slate-50'
+                    }`}
                   >
-                    <KeyRound className="w-4 h-4 text-emerald-600" />
-                    <span>Change Password</span>
+                    <KeyRound className={`w-4 h-4 ${profile?.role === 'developer' ? 'text-violet-600' : 'text-emerald-600'}`} />
+                    <span>{profile?.role === 'developer' ? 'Change Developer Password' : 'Change Password'}</span>
                   </button>
 
                   {isAdmin && (
@@ -541,6 +545,18 @@ export const AppLayout: React.FC = () => {
               </div>
             </div>
 
+            {profile?.role === 'developer' && (
+              <button
+                type="button"
+                onClick={() => setIsChangePasswordOpen(true)}
+                className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-semibold bg-violet-600/30 hover:bg-violet-600 text-violet-200 hover:text-white border border-violet-500/40 transition-all cursor-pointer shadow-2xs"
+                title="Change Developer Master Password"
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                <span>Change Dev Password</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={(e) => handleLogout(e)}
@@ -614,7 +630,19 @@ export const AppLayout: React.FC = () => {
                 })}
               </nav>
 
-              <div className="p-4 border-t border-slate-700">
+              <div className="p-4 border-t border-slate-700 space-y-2">
+                {profile?.role === 'developer' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSidebarOpen(false);
+                      setIsChangePasswordOpen(true);
+                    }}
+                    className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-semibold bg-violet-600/30 text-violet-200 border border-violet-500/40 hover:bg-violet-600 hover:text-white cursor-pointer transition-colors"
+                  >
+                    <KeyRound className="w-4 h-4" /> Change Dev Password
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={(e) => handleLogout(e)}

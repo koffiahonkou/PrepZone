@@ -25,6 +25,7 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import { useAuth } from '@/src/context/AuthContext';
+import { ChangePasswordModal } from '@/src/components/auth/ChangePasswordModal';
 import { dataStore } from '@/src/services/dataStore';
 import { UserProfile, UserRole, UserStatus } from '@/src/types';
 import { toast } from 'sonner';
@@ -32,6 +33,7 @@ import { toast } from 'sonner';
 export const AdminUsersPage: React.FC = () => {
   const { profile: currentLoggedInUser } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>(() => dataStore.getUsers());
+  const [isDeveloperPasswordModalOpen, setIsDeveloperPasswordModalOpen] = useState(false);
   const classes = dataStore.getClasses();
   const levels = dataStore.getLevels();
   const subjects = dataStore.getSubjects();
@@ -572,14 +574,25 @@ export const AdminUsersPage: React.FC = () => {
                       {/* Actions */}
                       <td className="py-3.5 px-4 text-right">
                         {u.role === 'developer' || u.uid === 'dev-system-superuser' ? (
-                          <div className="flex items-center justify-end">
+                          <div className="flex items-center justify-end gap-2">
                             <span
                               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-violet-50 text-violet-700 border border-violet-200 shadow-2xs select-none"
-                              title="This developer master account is protected and cannot be edited or removed by any other user."
+                              title="This developer master account is protected and cannot be edited or removed by other users."
                             >
                               <ShieldAlert className="w-3.5 h-3.5 text-violet-600" />
                               <span>Protected Master</span>
                             </span>
+                            {currentLoggedInUser?.role === 'developer' && (
+                              <button
+                                type="button"
+                                onClick={() => setIsDeveloperPasswordModalOpen(true)}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-violet-600 hover:bg-violet-700 text-white shadow-xs transition-colors cursor-pointer"
+                                title="Change Master Developer Password"
+                              >
+                                <KeyRound className="w-3.5 h-3.5" />
+                                <span>Change Password</span>
+                              </button>
+                            )}
                           </div>
                         ) : (
                           <div className="flex items-center justify-end gap-1.5">
@@ -1029,6 +1042,15 @@ export const AdminUsersPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Developer Change Password Modal */}
+      <ChangePasswordModal
+        isOpen={isDeveloperPasswordModalOpen}
+        onClose={() => {
+          setIsDeveloperPasswordModalOpen(false);
+          setUsers(dataStore.getUsers());
+        }}
+      />
     </div>
   );
 };

@@ -284,3 +284,42 @@ export interface CannedResponse {
   createdAt?: string;
 }
 
+export interface SystemBackupData {
+  version: '1.0' | '2.0';
+  exportedAt: string;
+  appName: string;
+  systemMeta: {
+    exportActor: string;
+    totalRecords: number;
+    stats: {
+      users: number;
+      classes: number;
+      levels: number;
+      subjects: number;
+      lessons: number;
+      quizzes: number;
+      submissions: number;
+      inquiries: number;
+      cannedResponses: number;
+      notifications: number;
+      auditLogs: number;
+    };
+  };
+  data: {
+    settings: SystemSettings;
+    users: UserProfile[];
+    classes: AcademicClass[];
+    levels: AcademicLevel[];
+    subjects: Subject[];
+    lessons: Lesson[];
+    quizzes: Quiz[];
+    submissions: Submission[];
+    inquiries: StudentInquiry[];
+    cannedResponses: CannedResponse[];
+    notifications: AppNotification[];
+    notificationReads: Record<string, boolean>;
+    inquiryReads: Record<string, boolean>;
+    auditLogs: AuditLog[];
+  };
+}
+

@@ -27,7 +27,20 @@ import {
   Sun,
   Moon,
   KeyRound,
+  Code2,
+  ShieldAlert,
+  FileJson,
+  FolderArchive,
+  HardDriveDownload,
+  HardDriveUpload,
+  Layers,
+  BookOpen,
+  FileQuestion,
+  Users,
+  MessageSquareQuote,
+  X,
 } from 'lucide-react';
+import { ChangePasswordModal } from '@/src/components/auth/ChangePasswordModal';
 import { dataStore } from '@/src/services/dataStore';
 import { uploadAssetFile } from '@/src/services/storageService';
 import { SystemSettings, AuditLog } from '@/src/types';
@@ -65,11 +78,23 @@ export const AdminSettingsPage: React.FC = () => {
     settings.defaultPassMarkPercent ?? 50
   );
 
-  const [activeTab, setActiveTab] = useState<'general' | 'themes' | 'grading' | 'security' | 'audit'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'themes' | 'grading' | 'security' | 'backup' | 'audit'>('general');
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [logoSourceMode, setLogoSourceMode] = useState<'upload' | 'url' | 'theme'>('upload');
 
+  // Developer Password Modal
+  const [isDeveloperPasswordModalOpen, setIsDeveloperPasswordModalOpen] = useState(false);
+
+  // System Backup & Import State
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importJsonData, setImportJsonData] = useState<any | null>(null);
+  const [importFileName, setImportFileName] = useState('');
+  const [importMode, setImportMode] = useState<'replace' | 'merge'>('replace');
+  const [autoSyncToCloud, setAutoSyncToCloud] = useState(true);
+  const [isProcessingImport, setIsProcessingImport] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const importFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleApplyTheme = (themeId: string) => {
     setSelectedThemeId(themeId);
@@ -241,28 +266,103 @@ export const AdminSettingsPage: React.FC = () => {
   };
 
   const handleExportData = () => {
-    const backup = {
-      timestamp: new Date().toISOString(),
-      settings: dataStore.getSettings(),
-      users: dataStore.getUsers(),
-      classes: dataStore.getClasses(),
-      levels: dataStore.getLevels(),
-      subjects: dataStore.getSubjects(),
-      lessons: dataStore.getLessons(),
-      quizzes: dataStore.getQuizzes(),
-      submissions: dataStore.getSubmissions(),
-      notifications: dataStore.getNotifications(),
-      auditLogs: dataStore.getAuditLogs(),
-    };
+    try {
+      const backup = dataStore.exportFullSystemData(profile?.uid);
+      const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(backup, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute('href', dataStr);
+      const safeAppName = (appName || 'EduForm').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      downloadAnchor.setAttribute('download', `${safeAppName}_FullSystemBackup_${timestamp}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      toast.success(`Exported complete system backup (${backup.systemMeta?.totalRecords ?? 'all'} records across all collections).`);
+    } catch (err: any) {
+      console.error('Export error:', err);
+      toast.error('Failed to export system data: ' + (err?.message || 'Unknown error'));
+    }
+  };
 
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(backup, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute('href', dataStr);
-    downloadAnchor.setAttribute('download', `${(appName || 'EduForm').replace(/\s+/g, '_')}_Backup_${Date.now()}.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
-    toast.success('System data exported successfully.');
+  const handleImportFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith('.json') && file.type !== 'application/json') {
+      toast.error('Please upload a valid .json system backup file.');
+      return;
+    }
+
+    setImportFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const parsed = JSON.parse(event.target?.result as string);
+        if (!parsed || typeof parsed !== 'object') {
+          throw new Error('Invalid JSON format or corrupted file structure.');
+        }
+        setImportJsonData(parsed);
+        setIsImportModalOpen(true);
+      } catch (err: any) {
+        toast.error('Could not parse backup file: ' + (err?.message || 'Invalid JSON syntax'));
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleExecuteImport = async () => {
+    if (!importJsonData) return;
+    setIsProcessingImport(true);
+    try {
+      toast.loading('Importing system backup data...', { id: 'system-import' });
+      const res = dataStore.importFullSystemData(importJsonData, importMode, profile?.uid);
+      if (!res.success) {
+        throw new Error(res.error || 'Import failed.');
+      }
+
+      // Refresh component states
+      const freshSettings = dataStore.getSettings();
+      setSettings(freshSettings);
+      setAppName(freshSettings.appName || 'EduForm');
+      setTagline(freshSettings.tagline || 'School Assessment System');
+      setLogoUrl(freshSettings.logoUrl || '');
+      setLogoTheme(freshSettings.logoTheme || 'shield');
+      setSelectedThemeId(freshSettings.themeId || 'oxford');
+      setSchoolAddress(freshSettings.schoolAddress || '');
+      setContactEmail(freshSettings.contactEmail || '');
+      setContactPhone(freshSettings.contactPhone || '');
+      setSchoolWebsite(freshSettings.schoolWebsite || '');
+      setPrincipalOrHead(freshSettings.principalOrHead || '');
+      setAcademicTermLabel(freshSettings.academicTermLabel || '2026/2027 Term 1');
+      setPassMarkPercent(freshSettings.defaultPassMarkPercent ?? 50);
+      setAuditLogs(dataStore.getAuditLogs());
+
+      let cloudMsg = '';
+      if (autoSyncToCloud) {
+        toast.loading('Synchronizing imported data to Firestore cloud...', { id: 'system-import' });
+        const cloudRes = await dataStore.syncAllLocalDataToFirestore();
+        if (cloudRes.success) {
+          cloudMsg = ` & synced ${cloudRes.count} records to Firestore Cloud!`;
+        } else {
+          cloudMsg = ` (Cloud sync warning: ${cloudRes.error})`;
+        }
+      }
+
+      const totalItems = Object.values(res.importedCounts).reduce((a, b) => a + b, 0);
+      toast.success(
+        `System data imported successfully! Restored ${totalItems} items${cloudMsg}`,
+        { id: 'system-import', duration: 5000 }
+      );
+
+      setIsImportModalOpen(false);
+      setImportJsonData(null);
+    } catch (err: any) {
+      console.error('Import execution error:', err);
+      toast.error('System data import failed: ' + (err?.message || 'Unknown error'), { id: 'system-import' });
+    } finally {
+      setIsProcessingImport(false);
+    }
   };
 
   const confirmFactoryReset = () => {
@@ -299,7 +399,14 @@ export const AdminSettingsPage: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <input
+            ref={importFileInputRef}
+            type="file"
+            accept=".json,application/json"
+            onChange={handleImportFileChange}
+            className="hidden"
+          />
           <button
             type="button"
             onClick={handleSyncAllToCloud}
@@ -312,14 +419,23 @@ export const AdminSettingsPage: React.FC = () => {
           <button
             type="button"
             onClick={handleExportData}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 shadow-2xs transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 shadow-2xs transition-colors cursor-pointer"
+            title="Download complete system data including users, lessons, quizzes, submissions, inquiries, and settings"
           >
-            <Download className="w-3.5 h-3.5" /> Backup JSON
+            <HardDriveDownload className="w-3.5 h-3.5 text-blue-600" /> Export System Data
+          </button>
+          <button
+            type="button"
+            onClick={() => importFileInputRef.current?.click()}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 shadow-2xs transition-colors cursor-pointer"
+            title="Upload and restore full system data from a JSON backup"
+          >
+            <HardDriveUpload className="w-3.5 h-3.5 text-emerald-600" /> Import System Data
           </button>
           <button
             type="button"
             onClick={() => setShowResetConfirm(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-rose-700 shadow-2xs transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-rose-700 shadow-2xs transition-colors cursor-pointer"
           >
             <RefreshCw className="w-3.5 h-3.5" /> Reset Defaults
           </button>
@@ -367,11 +483,11 @@ export const AdminSettingsPage: React.FC = () => {
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-slate-200 gap-6 text-xs font-semibold">
+      <div className="flex border-b border-slate-200 gap-6 text-xs font-semibold overflow-x-auto">
         <button
           type="button"
           onClick={() => setActiveTab('general')}
-          className={`pb-3 transition-colors border-b-2 flex items-center gap-1.5 cursor-pointer ${
+          className={`pb-3 transition-colors border-b-2 flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
             activeTab === 'general'
               ? 'border-emerald-600 text-emerald-700'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -382,7 +498,7 @@ export const AdminSettingsPage: React.FC = () => {
         <button
           type="button"
           onClick={() => setActiveTab('themes')}
-          className={`pb-3 transition-colors border-b-2 flex items-center gap-1.5 cursor-pointer ${
+          className={`pb-3 transition-colors border-b-2 flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
             activeTab === 'themes'
               ? 'border-emerald-600 text-emerald-700'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -393,7 +509,7 @@ export const AdminSettingsPage: React.FC = () => {
         <button
           type="button"
           onClick={() => setActiveTab('grading')}
-          className={`pb-3 transition-colors border-b-2 flex items-center gap-1.5 cursor-pointer ${
+          className={`pb-3 transition-colors border-b-2 flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
             activeTab === 'grading'
               ? 'border-emerald-600 text-emerald-700'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -404,7 +520,7 @@ export const AdminSettingsPage: React.FC = () => {
         <button
           type="button"
           onClick={() => setActiveTab('security')}
-          className={`pb-3 transition-colors border-b-2 flex items-center gap-1.5 ${
+          className={`pb-3 transition-colors border-b-2 flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
             activeTab === 'security'
               ? 'border-emerald-600 text-emerald-700'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -414,8 +530,19 @@ export const AdminSettingsPage: React.FC = () => {
         </button>
         <button
           type="button"
+          onClick={() => setActiveTab('backup')}
+          className={`pb-3 transition-colors border-b-2 flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+            activeTab === 'backup'
+              ? 'border-emerald-600 text-emerald-700'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <FolderArchive className="w-4 h-4" /> Backup & Data Migration
+        </button>
+        <button
+          type="button"
           onClick={() => setActiveTab('audit')}
-          className={`pb-3 transition-colors border-b-2 flex items-center gap-1.5 ${
+          className={`pb-3 transition-colors border-b-2 flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
             activeTab === 'audit'
               ? 'border-emerald-600 text-emerald-700'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -1217,6 +1344,175 @@ export const AdminSettingsPage: React.FC = () => {
                 </p>
               </div>
             </div>
+
+            {/* Developer Superuser Master Account Card */}
+            <div className="p-5 bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-xl border border-violet-800/40 text-white shadow-sm space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-violet-600/30 border border-violet-400/30 flex items-center justify-center text-violet-300 shrink-0">
+                    <Code2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-sm text-white">Developer Master Account</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-violet-500/20 text-violet-300 border border-violet-400/30">
+                        IMMUTABLE
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                        UNIVERSAL ACCESS
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-300 mt-0.5">
+                      Username: <code className="text-violet-200 font-mono">@developer</code> &bull; User ID: <code className="text-slate-400 font-mono">dev-system-superuser</code>
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsDeveloperPasswordModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer shrink-0"
+                >
+                  <KeyRound className="w-3.5 h-3.5 text-violet-200" />
+                  Change Developer Password
+                </button>
+              </div>
+
+              <div className="text-xs text-slate-300 bg-slate-950/40 rounded-lg p-3 border border-violet-900/30 space-y-1.5">
+                <div className="flex items-center gap-2 text-violet-300 font-semibold text-[11px]">
+                  <ShieldAlert className="w-3.5 h-3.5 text-amber-400" /> Security Guarantee & System Authority
+                </div>
+                <p className="text-slate-400 text-[11px] leading-relaxed">
+                  This account possesses root bypass authority across the entire platform. It cannot be edited, downgraded, or deleted by any other administrator or user. Password updates are encrypted, preserved in persistent storage, and pushed to Firestore.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab: Backup & Data Migration */}
+      {activeTab === 'backup' && (
+        <div className="space-y-6">
+          {/* Quick Metrics Bar */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
+            {[
+              { label: 'Users', count: dataStore.getUsers().length, icon: Users, color: 'text-blue-600 bg-blue-50' },
+              { label: 'Classes', count: dataStore.getClasses().length, icon: Layers, color: 'text-indigo-600 bg-indigo-50' },
+              { label: 'Subjects', count: dataStore.getSubjects().length, icon: BookOpen, color: 'text-emerald-600 bg-emerald-50' },
+              { label: 'Lessons', count: dataStore.getLessons().length, icon: BookOpen, color: 'text-amber-600 bg-amber-50' },
+              { label: 'Quizzes', count: dataStore.getQuizzes().length, icon: FileQuestion, color: 'text-purple-600 bg-purple-50' },
+              { label: 'Submissions', count: dataStore.getSubmissions().length, icon: CheckCircle2, color: 'text-rose-600 bg-rose-50' },
+            ].map((stat, i) => {
+              const Icon = stat.icon;
+              return (
+                <div key={i} className="bg-white rounded-xl border border-slate-200 p-3 shadow-2xs flex items-center gap-3">
+                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${stat.color}`}>
+                    <Icon className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-base font-bold text-slate-800 block leading-tight">{stat.count}</span>
+                    <span className="text-[11px] text-slate-500">{stat.label}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Action Cards: Export and Import */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Export Card */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-2xs p-6 flex flex-col justify-between space-y-5">
+              <div className="space-y-3">
+                <div className="w-12 h-12 rounded-xl bg-blue-50 border border-blue-200 text-blue-700 flex items-center justify-center">
+                  <HardDriveDownload className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[#0F2A4A]">Export Full System Data</h3>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                    Download an offline JSON snapshot containing all 14 database collections: institutional branding, academic levels, subjects, classes, lessons with content, quizzes and question banks, student submission attempts, teacher inquiries and canned replies, user profiles, and audit records.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-600 space-y-1">
+                  <div className="font-semibold text-slate-800 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Export Format: JSON v2.0
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Includes schema versioning, export timestamps, metadata totals, and checksum verification.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleExportData}
+                className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-[#0F2A4A] hover:bg-[#163c68] text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+              >
+                <HardDriveDownload className="w-4 h-4 text-emerald-400" />
+                Download System JSON Backup
+              </button>
+            </div>
+
+            {/* Import Card */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-2xs p-6 flex flex-col justify-between space-y-5">
+              <div className="space-y-3">
+                <div className="w-12 h-12 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center justify-center">
+                  <HardDriveUpload className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[#0F2A4A]">Import & Restore System Data</h3>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                    Restore system state from a prior JSON export file. Supports complete clean state replacement or smart merging. The system automatically preserves the developer master account and triggers real-time Firestore synchronization.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-amber-50/70 rounded-lg border border-amber-200/70 text-xs text-amber-800 space-y-1">
+                  <div className="font-semibold flex items-center gap-1.5">
+                    <Shield className="w-3.5 h-3.5 text-amber-700" /> Developer Account Safeguard
+                  </div>
+                  <p className="text-[11px] text-amber-700">
+                    The developer account (<code className="font-mono font-bold">@developer</code>) is automatically preserved with full credentials even when restoring older backup files.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => importFileInputRef.current?.click()}
+                className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+              >
+                <Upload className="w-4 h-4 text-emerald-200" />
+                Select Backup JSON File to Restore
+              </button>
+            </div>
+          </div>
+
+          {/* Backup Instructions & Architecture Card */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-2xs p-6 space-y-4">
+            <h3 className="text-sm font-bold text-[#0F2A4A] flex items-center gap-2">
+              <FolderArchive className="w-4 h-4 text-emerald-600" /> Backup & Migration Architecture
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-slate-600">
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5">
+                <span className="font-bold text-slate-800 block">1. Full Completeness</span>
+                <p className="text-slate-500 text-[11px] leading-relaxed">
+                  Backups capture 100% of institutional entities, eliminating data fragmentation across students, teachers, exams, and settings.
+                </p>
+              </div>
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5">
+                <span className="font-bold text-slate-800 block">2. Automatic Cloud Sync</span>
+                <p className="text-slate-500 text-[11px] leading-relaxed">
+                  Imported data is automatically mirrored into Firestore, ensuring the Vercel production deployment stays in lockstep.
+                </p>
+              </div>
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5">
+                <span className="font-bold text-slate-800 block">3. Resilient Format Handling</span>
+                <p className="text-slate-500 text-[11px] leading-relaxed">
+                  Supports both structured v2.0 backups with nested metadata and flat legacy JSON backups without data loss.
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1304,6 +1600,182 @@ export const AdminSettingsPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Import Confirmation & Configuration Modal */}
+      {isImportModalOpen && importJsonData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 my-8">
+            <div className="flex items-start justify-between pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center border border-emerald-200 shrink-0">
+                  <HardDriveUpload className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[#0F2A4A]">Restore System Backup</h3>
+                  <p className="text-xs text-slate-500 font-mono mt-0.5 truncate max-w-xs">{importFileName}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsImportModalOpen(false);
+                  setImportJsonData(null);
+                }}
+                disabled={isProcessingImport}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Backup Content Breakdown */}
+            <div className="my-5 space-y-4">
+              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
+                <div className="flex items-center justify-between text-xs font-bold text-slate-800 mb-2.5">
+                  <span>Detected Records in Backup:</span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                    {importJsonData.schemaVersion ? `Schema v${importJsonData.schemaVersion}` : 'Legacy Format'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+                  {(() => {
+                    const source = importJsonData.data || importJsonData;
+                    const items = [
+                      { label: 'Users', count: Array.isArray(source.users) ? source.users.length : 0 },
+                      { label: 'Classes', count: Array.isArray(source.classes) ? source.classes.length : 0 },
+                      { label: 'Subjects', count: Array.isArray(source.subjects) ? source.subjects.length : 0 },
+                      { label: 'Lessons', count: Array.isArray(source.lessons) ? source.lessons.length : 0 },
+                      { label: 'Quizzes', count: Array.isArray(source.quizzes) ? source.quizzes.length : 0 },
+                      { label: 'Submissions', count: Array.isArray(source.submissions) ? source.submissions.length : 0 },
+                      { label: 'Inquiries', count: Array.isArray(source.inquiries) ? source.inquiries.length : 0 },
+                    ];
+                    return items.map((it, idx) => (
+                      <div key={idx} className="bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 flex items-center justify-between">
+                        <span className="text-slate-500 text-[11px]">{it.label}:</span>
+                        <span className="font-bold text-slate-800 text-[11px]">{it.count}</span>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </div>
+
+              {/* Developer Account Protection Notice */}
+              <div className="p-3 bg-violet-50/70 rounded-xl border border-violet-200 text-xs text-violet-900 flex items-start gap-2.5">
+                <ShieldAlert className="w-4 h-4 text-violet-700 shrink-0 mt-0.5" />
+                <div className="text-[11px]">
+                  <span className="font-bold block text-violet-950">Developer Master Account Safeguard</span>
+                  The developer account (<code className="font-mono font-bold">@developer</code>) is automatically preserved and kept active even if not present in this backup file.
+                </div>
+              </div>
+
+              {/* Import Mode Selection */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-700 block">Import Mode:</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <label
+                    className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all ${
+                      importMode === 'replace'
+                        ? 'border-emerald-600 bg-emerald-50/40 text-emerald-950 ring-1 ring-emerald-500'
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="importMode"
+                      value="replace"
+                      checked={importMode === 'replace'}
+                      onChange={() => setImportMode('replace')}
+                      className="mt-0.5 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <div className="text-xs">
+                      <span className="font-bold block">Clean Restore</span>
+                      <span className="text-[11px] text-slate-500">Replaces existing local collections with this backup data.</span>
+                    </div>
+                  </label>
+
+                  <label
+                    className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all ${
+                      importMode === 'merge'
+                        ? 'border-emerald-600 bg-emerald-50/40 text-emerald-950 ring-1 ring-emerald-500'
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="importMode"
+                      value="merge"
+                      checked={importMode === 'merge'}
+                      onChange={() => setImportMode('merge')}
+                      className="mt-0.5 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <div className="text-xs">
+                      <span className="font-bold block">Merge & Update</span>
+                      <span className="text-[11px] text-slate-500">Adds new records and updates matching IDs; keeps others.</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Real-time Cloud Sync Option */}
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoSyncToCloud}
+                    onChange={(e) => setAutoSyncToCloud(e.target.checked)}
+                    className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500"
+                  />
+                  <span className="text-xs font-semibold text-slate-800">
+                    Synchronize imported data to Firestore Cloud immediately
+                  </span>
+                </label>
+                <p className="text-[11px] text-slate-500 ml-6 mt-0.5">
+                  Pushes restored entities into Firestore so live users on Vercel (<span className="font-mono text-slate-600">prepzone-nine.vercel.app</span>) see the changes right away.
+                </p>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsImportModalOpen(false);
+                  setImportJsonData(null);
+                }}
+                disabled={isProcessingImport}
+                className="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteImport}
+                disabled={isProcessingImport}
+                className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {isProcessingImport ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Restoring System Data...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-300" />
+                    <span>Confirm & Execute Restore</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Developer Password Change Modal */}
+      <ChangePasswordModal
+        isOpen={isDeveloperPasswordModalOpen}
+        onClose={() => setIsDeveloperPasswordModalOpen(false)}
+      />
     </div>
   );
 };

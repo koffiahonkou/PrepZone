@@ -341,7 +341,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const switchDemoUser = (key: 'developer' | 'admin' | 'teacher1' | 'student1' | 'student2' | 'inactive_user') => {
-    const demoProf = DEMO_USERS[key] || dataStore.getUsers().find((u) => u.usernameLower === key);
+    const fromStore = key === 'developer'
+      ? dataStore.getUserById(DEVELOPER_USER.uid)
+      : dataStore.getUsers().find((u) => u.usernameLower === key);
+    const demoProf = fromStore || DEMO_USERS[key];
     if (!demoProf) {
       throw new AppError('Demo account not found.');
     }

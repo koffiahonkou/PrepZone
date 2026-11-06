@@ -8,6 +8,7 @@ import {
   AlertCircle,
   X,
   ShieldCheck,
+  Code2,
 } from 'lucide-react';
 import { useAuth } from '@/src/context/AuthContext';
 import { toast } from 'sonner';
@@ -32,6 +33,8 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!isOpen || !profile) return null;
+
+  const isDevAccount = profile.role === 'developer';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,7 +68,11 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
         return;
       }
 
-      toast.success('Your password has been updated successfully!');
+      toast.success(
+        isDevAccount
+          ? 'Developer master password updated successfully!'
+          : 'Your password has been updated successfully!'
+      );
       onClose();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error changing password.';
@@ -83,14 +90,32 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
     >
       <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95">
         {/* Header */}
-        <div className="bg-[#0F2A4A] text-white p-5 flex items-center justify-between">
+        <div
+          className={`p-5 flex items-center justify-between text-white ${
+            isDevAccount
+              ? 'bg-gradient-to-r from-[#0F2A4A] via-violet-950 to-[#0F2A4A]'
+              : 'bg-[#0F2A4A]'
+          }`}
+        >
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center text-emerald-400 border border-white/15">
-              <KeyRound className="w-5 h-5" />
+            <div
+              className={`w-9 h-9 rounded-xl flex items-center justify-center border ${
+                isDevAccount
+                  ? 'bg-violet-500/20 text-violet-300 border-violet-400/30'
+                  : 'bg-white/10 text-emerald-400 border-white/15'
+              }`}
+            >
+              {isDevAccount ? <Code2 className="w-5 h-5" /> : <KeyRound className="w-5 h-5" />}
             </div>
             <div>
-              <h3 className="font-bold text-base leading-tight">Change Password</h3>
-              <p className="text-xs text-slate-300">Update your account credentials</p>
+              <h3 className="font-bold text-base leading-tight">
+                {isDevAccount ? 'Change Developer Master Password' : 'Change Password'}
+              </h3>
+              <p className="text-xs text-slate-300">
+                {isDevAccount
+                  ? 'Update superuser credentials for @developer'
+                  : 'Update your account credentials'}
+              </p>
             </div>
           </div>
           <button
@@ -106,13 +131,32 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {/* Account Indicator */}
-          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between text-xs">
+          <div
+            className={`p-3 rounded-xl border flex items-center justify-between text-xs ${
+              isDevAccount
+                ? 'bg-violet-50/70 border-violet-200'
+                : 'bg-slate-50 border-slate-200'
+            }`}
+          >
             <div>
               <span className="font-bold text-slate-800 block">{profile.fullName}</span>
-              <span className="text-slate-500 font-mono text-[11px]">@{profile.username}</span>
+              <span
+                className={`font-mono text-[11px] ${
+                  isDevAccount ? 'text-violet-700' : 'text-slate-500'
+                }`}
+              >
+                @{profile.username}
+              </span>
             </div>
-            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800">
-              <ShieldCheck className="w-3 h-3" /> {profile.role}
+            <span
+              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                isDevAccount
+                  ? 'bg-violet-200 text-violet-900 border border-violet-300'
+                  : 'bg-emerald-100 text-emerald-800'
+              }`}
+            >
+              {isDevAccount ? <Code2 className="w-3 h-3" /> : <ShieldCheck className="w-3 h-3" />}
+              {isDevAccount ? 'Superuser' : profile.role}
             </span>
           </div>
 
@@ -274,7 +318,9 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
                 newPassword.length < 6 ||
                 newPassword !== confirmPassword
               }
-              className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-xs font-semibold text-white bg-[#0F2A4A] hover:bg-[#163c68] disabled:opacity-50 disabled:cursor-not-allowed shadow-xs transition-colors cursor-pointer"
+              className={`inline-flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-xs font-semibold text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                isDevAccount ? 'bg-violet-700 hover:bg-violet-800' : 'bg-[#0F2A4A] hover:bg-[#163c68]'
+              }`}
             >
               {isSubmitting ? (
                 <>

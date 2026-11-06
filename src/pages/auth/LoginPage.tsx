@@ -102,9 +102,11 @@ export const LoginPage: React.FC = () => {
     }
   };
 
-  const handleQuickFill = (username: string, pass = 'Eduform123!') => {
+  const handleQuickFill = (username: string, pass?: string) => {
+    const user = dataStore.getUserByUsername(username);
+    const passwordToUse = pass || user?.password || 'Eduform123!';
     setValue('username', username, { shouldValidate: true });
-    setValue('password', pass, { shouldValidate: true });
+    setValue('password', passwordToUse, { shouldValidate: true });
   };
 
   return (

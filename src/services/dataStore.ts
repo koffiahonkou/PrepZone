@@ -13,6 +13,7 @@ import {
   InquiryMessage,
   UserRole,
   CannedResponse,
+  SystemBackupData,
 } from '@/src/types';
 import {
   INITIAL_USERS,
@@ -448,11 +449,322 @@ class DataStore {
       }
     }
 
+    // 11. Submissions
+    for (const sub of this.getSubmissions()) {
+      try {
+        await setDoc(doc(db, 'submissions', sub.id), sanitizeForFirestore(sub), { merge: true });
+        count++;
+      } catch (e: any) {
+        console.warn(`Sync submission ${sub.id} warning:`, e);
+      }
+    }
+
     if (count === 0 && errors.length > 0) {
       return { success: false, count: 0, error: errors.join('; ') };
     }
 
     return { success: true, count };
+  }
+
+  /**
+   * Generates a complete, structured export of the entire system data.
+   * Includes settings, users, classes, levels, subjects, lessons, quizzes,
+   * submissions, student inquiries, canned responses, notifications, and audit logs.
+   */
+  public exportFullSystemData(actorId?: string): SystemBackupData {
+    const settings = this.getSettings();
+    const users = this.getUsers();
+    const classes = this.getClasses();
+    const levels = this.getLevels();
+    const subjects = this.getSubjects();
+    const lessons = this.getLessons();
+    const quizzes = this.getQuizzes();
+    const submissions = this.getSubmissions();
+    const inquiries = this.getInquiries();
+    const cannedResponses = this.getCannedResponses();
+    const notifications = this.getNotifications();
+    const notificationReads = getStoredOrInit<Record<string, boolean>>(STORAGE_KEYS.NOTIFICATION_READS, {});
+    const inquiryReads = getStoredOrInit<Record<string, boolean>>(STORAGE_KEYS.INQUIRY_READS, {});
+    const auditLogs = this.getAuditLogs();
+
+    const stats = {
+      users: users.length,
+      classes: classes.length,
+      levels: levels.length,
+      subjects: subjects.length,
+      lessons: lessons.length,
+      quizzes: quizzes.length,
+      submissions: submissions.length,
+      inquiries: inquiries.length,
+      cannedResponses: cannedResponses.length,
+      notifications: notifications.length,
+      auditLogs: auditLogs.length,
+    };
+
+    const totalRecords = Object.values(stats).reduce((a, b) => a + b, 0);
+
+    const backup: SystemBackupData = {
+      version: '2.0',
+      exportedAt: new Date().toISOString(),
+      appName: settings.appName || 'EduForm',
+      systemMeta: {
+        exportActor: actorId || 'system',
+        totalRecords,
+        stats,
+      },
+      data: {
+        settings,
+        users,
+        classes,
+        levels,
+        subjects,
+        lessons,
+        quizzes,
+        submissions,
+        inquiries,
+        cannedResponses,
+        notifications,
+        notificationReads,
+        inquiryReads,
+        auditLogs,
+      },
+    };
+
+    this.addAuditLog({
+      actorId: actorId || 'admin',
+      action: 'SYSTEM_DATA_EXPORTED',
+      targetType: 'system',
+      targetId: 'backup',
+      meta: {
+        totalRecords,
+        stats,
+      },
+    });
+
+    return backup;
+  }
+
+  /**
+   * Imports system backup data into localStorage, enforces developer account safeguards,
+   * dispatches real-time update events, and returns detailed entity statistics.
+   */
+  public importFullSystemData(
+    backupJson: any,
+    mode: 'replace' | 'merge' = 'replace',
+    actorId?: string
+  ): {
+    success: boolean;
+    importedCounts: Record<string, number>;
+    error?: string;
+  } {
+    try {
+      if (!backupJson || typeof backupJson !== 'object') {
+        return { success: false, importedCounts: {}, error: 'Invalid backup file format.' };
+      }
+
+      // Support structured v2.0 backups (`data` key) and flat legacy backup files
+      const sourceData =
+        backupJson.data && typeof backupJson.data === 'object' ? backupJson.data : backupJson;
+
+      const importedCounts: Record<string, number> = {};
+
+      // 1. Settings
+      if (sourceData.settings && typeof sourceData.settings === 'object') {
+        const currentSettings = this.getSettings();
+        const mergedSettings: SystemSettings = {
+          ...currentSettings,
+          ...sourceData.settings,
+          updatedAt: new Date().toISOString(),
+        };
+        this.saveSettings(mergedSettings);
+        importedCounts.settings = 1;
+      }
+
+      // 2. Levels
+      if (Array.isArray(sourceData.levels)) {
+        if (mode === 'replace') {
+          saveStore(STORAGE_KEYS.LEVELS, sourceData.levels);
+        } else {
+          const existing = this.getLevels();
+          const map = new Map(existing.map((l) => [l.id, l]));
+          sourceData.levels.forEach((l: AcademicLevel) => map.set(l.id, l));
+          saveStore(STORAGE_KEYS.LEVELS, Array.from(map.values()));
+        }
+        importedCounts.levels = sourceData.levels.length;
+      }
+
+      // 3. Classes
+      if (Array.isArray(sourceData.classes)) {
+        if (mode === 'replace') {
+          saveStore(STORAGE_KEYS.CLASSES, sourceData.classes);
+        } else {
+          const existing = this.getClasses();
+          const map = new Map(existing.map((c) => [c.id, c]));
+          sourceData.classes.forEach((c: AcademicClass) => map.set(c.id, c));
+          saveStore(STORAGE_KEYS.CLASSES, Array.from(map.values()));
+        }
+        importedCounts.classes = sourceData.classes.length;
+      }
+
+      // 4. Subjects
+      if (Array.isArray(sourceData.subjects)) {
+        if (mode === 'replace') {
+          saveStore(STORAGE_KEYS.SUBJECTS, sourceData.subjects);
+        } else {
+          const existing = this.getSubjects();
+          const map = new Map(existing.map((s) => [s.id, s]));
+          sourceData.subjects.forEach((s: Subject) => map.set(s.id, s));
+          saveStore(STORAGE_KEYS.SUBJECTS, Array.from(map.values()));
+        }
+        importedCounts.subjects = sourceData.subjects.length;
+      }
+
+      // 5. Lessons
+      if (Array.isArray(sourceData.lessons)) {
+        if (mode === 'replace') {
+          saveStore(STORAGE_KEYS.LESSONS, sourceData.lessons);
+        } else {
+          const existing = this.getLessons();
+          const map = new Map(existing.map((l) => [l.id, l]));
+          sourceData.lessons.forEach((l: Lesson) => map.set(l.id, l));
+          saveStore(STORAGE_KEYS.LESSONS, Array.from(map.values()));
+        }
+        importedCounts.lessons = sourceData.lessons.length;
+        if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('eduform_lessons_updated'));
+      }
+
+      // 6. Quizzes
+      if (Array.isArray(sourceData.quizzes)) {
+        if (mode === 'replace') {
+          saveStore(STORAGE_KEYS.QUIZZES, sourceData.quizzes);
+        } else {
+          const existing = this.getQuizzes();
+          const map = new Map(existing.map((q) => [q.id, q]));
+          sourceData.quizzes.forEach((q: Quiz) => map.set(q.id, q));
+          saveStore(STORAGE_KEYS.QUIZZES, Array.from(map.values()));
+        }
+        importedCounts.quizzes = sourceData.quizzes.length;
+        if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('eduform_quizzes_updated'));
+      }
+
+      // 7. Submissions
+      if (Array.isArray(sourceData.submissions)) {
+        if (mode === 'replace') {
+          saveStore(STORAGE_KEYS.SUBMISSIONS, sourceData.submissions);
+        } else {
+          const existing = this.getSubmissions();
+          const map = new Map(existing.map((s) => [s.id, s]));
+          sourceData.submissions.forEach((s: Submission) => map.set(s.id, s));
+          saveStore(STORAGE_KEYS.SUBMISSIONS, Array.from(map.values()));
+        }
+        importedCounts.submissions = sourceData.submissions.length;
+      }
+
+      // 8. Inquiries
+      if (Array.isArray(sourceData.inquiries)) {
+        if (mode === 'replace') {
+          saveStore(STORAGE_KEYS.INQUIRIES, sourceData.inquiries);
+        } else {
+          const existing = this.getInquiries();
+          const map = new Map(existing.map((i) => [i.id, i]));
+          sourceData.inquiries.forEach((i: StudentInquiry) => map.set(i.id, i));
+          saveStore(STORAGE_KEYS.INQUIRIES, Array.from(map.values()));
+        }
+        importedCounts.inquiries = sourceData.inquiries.length;
+        if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('eduform_inquiries_updated'));
+      }
+
+      // 9. Canned Responses
+      if (Array.isArray(sourceData.cannedResponses)) {
+        if (mode === 'replace') {
+          saveStore(STORAGE_KEYS.CANNED_RESPONSES, sourceData.cannedResponses);
+        } else {
+          const existing = this.getCannedResponses();
+          const map = new Map(existing.map((c) => [c.id, c]));
+          sourceData.cannedResponses.forEach((c: CannedResponse) => map.set(c.id, c));
+          saveStore(STORAGE_KEYS.CANNED_RESPONSES, Array.from(map.values()));
+        }
+        importedCounts.cannedResponses = sourceData.cannedResponses.length;
+      }
+
+      // 10. Notifications
+      if (Array.isArray(sourceData.notifications)) {
+        if (mode === 'replace') {
+          saveStore(STORAGE_KEYS.NOTIFICATIONS, sourceData.notifications);
+        } else {
+          const existing = this.getNotifications();
+          const map = new Map(existing.map((n) => [n.id, n]));
+          sourceData.notifications.forEach((n: AppNotification) => map.set(n.id, n));
+          saveStore(STORAGE_KEYS.NOTIFICATIONS, Array.from(map.values()));
+        }
+        importedCounts.notifications = sourceData.notifications.length;
+        if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('eduform_notifications_updated'));
+      }
+
+      // 11. Notification Reads & Inquiry Reads
+      if (sourceData.notificationReads && typeof sourceData.notificationReads === 'object') {
+        saveStore(STORAGE_KEYS.NOTIFICATION_READS, sourceData.notificationReads);
+      }
+      if (sourceData.inquiryReads && typeof sourceData.inquiryReads === 'object') {
+        saveStore(STORAGE_KEYS.INQUIRY_READS, sourceData.inquiryReads);
+      }
+
+      // 12. Users (ALWAYS PROTECTING DEVELOPER ACCOUNT)
+      if (Array.isArray(sourceData.users)) {
+        let importedUsers: UserProfile[] = sourceData.users;
+        const currentDev = this.getUserById(DEVELOPER_USER.uid) || DEVELOPER_USER;
+        const hasDevInImport = importedUsers.some(
+          (u) => u.uid === DEVELOPER_USER.uid || u.usernameLower === 'developer'
+        );
+        if (!hasDevInImport) {
+          importedUsers = [currentDev, ...importedUsers];
+        } else {
+          importedUsers = importedUsers.map((u) => {
+            if (u.uid === DEVELOPER_USER.uid || u.usernameLower === 'developer') {
+              return {
+                ...u,
+                role: 'developer' as const,
+                status: 'active' as const,
+                password: u.password || currentDev.password || 'Eduform123!',
+              };
+            }
+            return u;
+          });
+        }
+
+        if (mode === 'replace') {
+          saveStore(STORAGE_KEYS.USERS, importedUsers);
+        } else {
+          const existing = this.getUsers();
+          const map = new Map(existing.map((u) => [u.uid, u]));
+          importedUsers.forEach((u: UserProfile) => map.set(u.uid, u));
+          saveStore(STORAGE_KEYS.USERS, Array.from(map.values()));
+        }
+        importedCounts.users = importedUsers.length;
+        if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('eduform_users_updated'));
+      }
+
+      // 13. Audit Log
+      this.addAuditLog({
+        actorId: actorId || 'admin',
+        action: 'SYSTEM_DATA_IMPORTED',
+        targetType: 'system',
+        targetId: 'backup',
+        meta: {
+          mode,
+          importedCounts,
+        },
+      });
+
+      return { success: true, importedCounts };
+    } catch (err: any) {
+      console.error('importFullSystemData error:', err);
+      return {
+        success: false,
+        importedCounts: {},
+        error: err?.message || 'Failed to parse and import backup file.',
+      };
+    }
   }
 
   // --- Users ---
@@ -687,6 +999,15 @@ class DataStore {
     saveStore(STORAGE_KEYS.USERS, users);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('eduform_users_updated', { detail: user }));
+    }
+    // Also push user to Firestore cloud so real-time sync reflects password and role updates
+    try {
+      const payload = enforceFirestoreSizeLimit(user);
+      setDoc(doc(db, 'users', user.uid), payload, { merge: true }).catch((err) =>
+        console.warn('Async user save to firestore deferred:', err)
+      );
+    } catch {
+      // offline fallback
     }
     return true;
   }
