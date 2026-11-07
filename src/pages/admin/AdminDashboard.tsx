@@ -22,11 +22,33 @@ import { toast } from 'sonner';
 export const AdminDashboard: React.FC = () => {
   const { profile } = useAuth();
 
-  const users = React.useMemo(() => dataStore.getUsers(), []);
-  const classes = React.useMemo(() => dataStore.getClasses(), []);
-  const quizzes = React.useMemo(() => dataStore.getQuizzes(), []);
-  const submissions = React.useMemo(() => dataStore.getSubmissions(), []);
-  const lessons = React.useMemo(() => dataStore.getLessons(), []);
+  const [users, setUsers] = React.useState(() => dataStore.getUsers());
+  const [classes, setClasses] = React.useState(() => dataStore.getClasses());
+  const [quizzes, setQuizzes] = React.useState(() => dataStore.getQuizzes());
+  const [submissions, setSubmissions] = React.useState(() => dataStore.getSubmissions());
+  const [lessons, setLessons] = React.useState(() => dataStore.getLessons());
+
+  React.useEffect(() => {
+    const handleUpdate = () => {
+      setUsers(dataStore.getUsers());
+      setClasses(dataStore.getClasses());
+      setQuizzes(dataStore.getQuizzes());
+      setSubmissions(dataStore.getSubmissions());
+      setLessons(dataStore.getLessons());
+    };
+    window.addEventListener('eduform_users_updated', handleUpdate);
+    window.addEventListener('eduform_classes_updated', handleUpdate);
+    window.addEventListener('eduform_quizzes_updated', handleUpdate);
+    window.addEventListener('eduform_submissions_updated', handleUpdate);
+    window.addEventListener('eduform_lessons_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('eduform_users_updated', handleUpdate);
+      window.removeEventListener('eduform_classes_updated', handleUpdate);
+      window.removeEventListener('eduform_quizzes_updated', handleUpdate);
+      window.removeEventListener('eduform_submissions_updated', handleUpdate);
+      window.removeEventListener('eduform_lessons_updated', handleUpdate);
+    };
+  }, []);
 
   const activeStudents = users.filter((u) => u.role === 'student' && u.status === 'active').length;
   const pendingSubmissions = submissions.filter((s) => s.status === 'pending_manual');

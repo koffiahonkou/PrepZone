@@ -1,14 +1,33 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { GraduationCap, BookOpen, Layers, Plus, Pencil, Trash2, X, AlertTriangle } from 'lucide-react';
 import { dataStore } from '@/src/services/dataStore';
-import { Subject } from '@/src/types';
+import { Subject, AcademicClass, Quiz, Lesson } from '@/src/types';
 import { toast } from 'sonner';
 
 export const AdminSubjectsPage: React.FC = () => {
   const [subjects, setSubjects] = useState<Subject[]>(() => dataStore.getSubjects());
-  const classes = dataStore.getClasses();
-  const quizzes = dataStore.getQuizzes();
-  const lessons = dataStore.getLessons();
+  const [classes, setClasses] = useState<AcademicClass[]>(() => dataStore.getClasses());
+  const [quizzes, setQuizzes] = useState<Quiz[]>(() => dataStore.getQuizzes());
+  const [lessons, setLessons] = useState<Lesson[]>(() => dataStore.getLessons());
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      setSubjects(dataStore.getSubjects());
+      setClasses(dataStore.getClasses());
+      setQuizzes(dataStore.getQuizzes());
+      setLessons(dataStore.getLessons());
+    };
+    window.addEventListener('eduform_subjects_updated', handleUpdate);
+    window.addEventListener('eduform_classes_updated', handleUpdate);
+    window.addEventListener('eduform_quizzes_updated', handleUpdate);
+    window.addEventListener('eduform_lessons_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('eduform_subjects_updated', handleUpdate);
+      window.removeEventListener('eduform_classes_updated', handleUpdate);
+      window.removeEventListener('eduform_quizzes_updated', handleUpdate);
+      window.removeEventListener('eduform_lessons_updated', handleUpdate);
+    };
+  }, []);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);

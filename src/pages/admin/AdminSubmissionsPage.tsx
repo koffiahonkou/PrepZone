@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ClipboardList,
   Clock,
@@ -10,14 +10,33 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { dataStore } from '@/src/services/dataStore';
-import { Submission } from '@/src/types';
+import { Submission, UserProfile, Quiz, AcademicClass } from '@/src/types';
 import { toast } from 'sonner';
 
 export const AdminSubmissionsPage: React.FC = () => {
   const [submissions, setSubmissions] = useState<Submission[]>(() => dataStore.getSubmissions());
-  const users = dataStore.getUsers();
-  const quizzes = dataStore.getQuizzes();
-  const classes = dataStore.getClasses();
+  const [users, setUsers] = useState<UserProfile[]>(() => dataStore.getUsers());
+  const [quizzes, setQuizzes] = useState<Quiz[]>(() => dataStore.getQuizzes());
+  const [classes, setClasses] = useState<AcademicClass[]>(() => dataStore.getClasses());
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      setSubmissions(dataStore.getSubmissions());
+      setUsers(dataStore.getUsers());
+      setQuizzes(dataStore.getQuizzes());
+      setClasses(dataStore.getClasses());
+    };
+    window.addEventListener('eduform_submissions_updated', handleUpdate);
+    window.addEventListener('eduform_users_updated', handleUpdate);
+    window.addEventListener('eduform_quizzes_updated', handleUpdate);
+    window.addEventListener('eduform_classes_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('eduform_submissions_updated', handleUpdate);
+      window.removeEventListener('eduform_users_updated', handleUpdate);
+      window.removeEventListener('eduform_quizzes_updated', handleUpdate);
+      window.removeEventListener('eduform_classes_updated', handleUpdate);
+    };
+  }, []);
 
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [selectedSub, setSelectedSub] = useState<Submission | null>(null);

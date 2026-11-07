@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Layers,
   BookOpen,
@@ -13,14 +13,33 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { dataStore } from '@/src/services/dataStore';
-import { AcademicClass, AcademicLevel } from '@/src/types';
+import { AcademicClass, AcademicLevel, Subject, UserProfile } from '@/src/types';
 import { toast } from 'sonner';
 
 export const AdminClassesPage: React.FC = () => {
   const [classes, setClasses] = useState<AcademicClass[]>(() => dataStore.getClasses());
   const [levels, setLevels] = useState<AcademicLevel[]>(() => dataStore.getLevels());
-  const subjects = dataStore.getSubjects();
-  const users = dataStore.getUsers();
+  const [subjects, setSubjects] = useState<Subject[]>(() => dataStore.getSubjects());
+  const [users, setUsers] = useState<UserProfile[]>(() => dataStore.getUsers());
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      setClasses(dataStore.getClasses());
+      setLevels(dataStore.getLevels());
+      setSubjects(dataStore.getSubjects());
+      setUsers(dataStore.getUsers());
+    };
+    window.addEventListener('eduform_classes_updated', handleUpdate);
+    window.addEventListener('eduform_levels_updated', handleUpdate);
+    window.addEventListener('eduform_subjects_updated', handleUpdate);
+    window.addEventListener('eduform_users_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('eduform_classes_updated', handleUpdate);
+      window.removeEventListener('eduform_levels_updated', handleUpdate);
+      window.removeEventListener('eduform_subjects_updated', handleUpdate);
+      window.removeEventListener('eduform_users_updated', handleUpdate);
+    };
+  }, []);
 
   const [activeTab, setActiveTab] = useState<'classes' | 'levels'>('classes');
 

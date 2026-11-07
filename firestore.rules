@@ -43,6 +43,10 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    match /test/{testId} {
+      allow read, write: if true;
+    }
+
     // ACADEMIC LEVELS
     match /levels/{levelId} {
       allow read, write: if true;

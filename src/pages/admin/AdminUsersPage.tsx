@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Users,
   Search,
@@ -27,16 +27,35 @@ import {
 import { useAuth } from '@/src/context/AuthContext';
 import { ChangePasswordModal } from '@/src/components/auth/ChangePasswordModal';
 import { dataStore } from '@/src/services/dataStore';
-import { UserProfile, UserRole, UserStatus } from '@/src/types';
+import { UserProfile, UserRole, UserStatus, AcademicClass, AcademicLevel, Subject } from '@/src/types';
 import { toast } from 'sonner';
 
 export const AdminUsersPage: React.FC = () => {
   const { profile: currentLoggedInUser } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>(() => dataStore.getUsers());
   const [isDeveloperPasswordModalOpen, setIsDeveloperPasswordModalOpen] = useState(false);
-  const classes = dataStore.getClasses();
-  const levels = dataStore.getLevels();
-  const subjects = dataStore.getSubjects();
+  const [classes, setClasses] = useState<AcademicClass[]>(() => dataStore.getClasses());
+  const [levels, setLevels] = useState<AcademicLevel[]>(() => dataStore.getLevels());
+  const [subjects, setSubjects] = useState<Subject[]>(() => dataStore.getSubjects());
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      setUsers(dataStore.getUsers());
+      setClasses(dataStore.getClasses());
+      setLevels(dataStore.getLevels());
+      setSubjects(dataStore.getSubjects());
+    };
+    window.addEventListener('eduform_users_updated', handleUpdate);
+    window.addEventListener('eduform_classes_updated', handleUpdate);
+    window.addEventListener('eduform_levels_updated', handleUpdate);
+    window.addEventListener('eduform_subjects_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('eduform_users_updated', handleUpdate);
+      window.removeEventListener('eduform_classes_updated', handleUpdate);
+      window.removeEventListener('eduform_levels_updated', handleUpdate);
+      window.removeEventListener('eduform_subjects_updated', handleUpdate);
+    };
+  }, []);
 
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');

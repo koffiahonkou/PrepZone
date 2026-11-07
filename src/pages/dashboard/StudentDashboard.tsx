@@ -33,11 +33,11 @@ export const StudentDashboard: React.FC = () => {
   const { profile } = useAuth();
   const [readTicker, setReadTicker] = useState(0);
 
-  const quizzes = useMemo(() => dataStore.getQuizzes(), []);
-  const classes = useMemo(() => dataStore.getClasses(), []);
-  const subjects = useMemo(() => dataStore.getSubjects(), []);
-  const allLessons = useMemo(() => dataStore.getLessons(), []);
-  const studentSubs = useMemo(() => dataStore.getSubmissionsByStudent(profile?.uid || ''), [profile?.uid]);
+  const [quizzes, setQuizzes] = useState(() => dataStore.getQuizzes());
+  const [classes, setClasses] = useState(() => dataStore.getClasses());
+  const [subjects, setSubjects] = useState(() => dataStore.getSubjects());
+  const [allLessons, setAllLessons] = useState(() => dataStore.getLessons());
+  const [studentSubs, setStudentSubs] = useState(() => dataStore.getSubmissionsByStudent(profile?.uid || ''));
 
   const [inquiries, setInquiries] = useState(() =>
     dataStore.getInquiriesByStudent(profile?.uid || '')
@@ -45,8 +45,31 @@ export const StudentDashboard: React.FC = () => {
 
   useEffect(() => {
     const handleInq = () => setInquiries(dataStore.getInquiriesByStudent(profile?.uid || ''));
+    const handleDataUpdate = () => {
+      setQuizzes(dataStore.getQuizzes());
+      setClasses(dataStore.getClasses());
+      setSubjects(dataStore.getSubjects());
+      setAllLessons(dataStore.getLessons());
+      setStudentSubs(dataStore.getSubmissionsByStudent(profile?.uid || ''));
+    };
+
     window.addEventListener('eduform_inquiries_updated', handleInq);
-    return () => window.removeEventListener('eduform_inquiries_updated', handleInq);
+    window.addEventListener('eduform_quizzes_updated', handleDataUpdate);
+    window.addEventListener('eduform_classes_updated', handleDataUpdate);
+    window.addEventListener('eduform_subjects_updated', handleDataUpdate);
+    window.addEventListener('eduform_lessons_updated', handleDataUpdate);
+    window.addEventListener('eduform_submissions_updated', handleDataUpdate);
+    window.addEventListener('eduform_notifications_updated', handleDataUpdate);
+
+    return () => {
+      window.removeEventListener('eduform_inquiries_updated', handleInq);
+      window.removeEventListener('eduform_quizzes_updated', handleDataUpdate);
+      window.removeEventListener('eduform_classes_updated', handleDataUpdate);
+      window.removeEventListener('eduform_subjects_updated', handleDataUpdate);
+      window.removeEventListener('eduform_lessons_updated', handleDataUpdate);
+      window.removeEventListener('eduform_submissions_updated', handleDataUpdate);
+      window.removeEventListener('eduform_notifications_updated', handleDataUpdate);
+    };
   }, [profile?.uid]);
 
   const allNotifications = useMemo(() => dataStore.getNotifications(), [readTicker]);

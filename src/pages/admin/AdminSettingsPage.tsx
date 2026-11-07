@@ -39,6 +39,10 @@ import {
   Users,
   MessageSquareQuote,
   X,
+  Activity,
+  CloudDownload,
+  CloudUpload,
+  ExternalLink,
 } from 'lucide-react';
 import { ChangePasswordModal } from '@/src/components/auth/ChangePasswordModal';
 import { dataStore } from '@/src/services/dataStore';
@@ -57,6 +61,19 @@ export const AdminSettingsPage: React.FC = () => {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => dataStore.getAuditLogs());
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const [isSyncingCloud, setIsSyncingCloud] = useState(false);
+  const [isPullingCloud, setIsPullingCloud] = useState(false);
+  const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false);
+  const [diagnosticsData, setDiagnosticsData] = useState<{
+    reachable: boolean;
+    latencyMs: number;
+    databaseId: string;
+    projectId: string;
+    vercelUrl: string;
+    cloudCounts: Record<string, number>;
+    localCounts: Record<string, number>;
+    error?: string;
+  } | null>(null);
+  const [loadingDiagnostics, setLoadingDiagnostics] = useState(false);
 
   // System Information Form State
   const [appName, setAppName] = useState(settings.appName || 'EduForm');
@@ -168,6 +185,40 @@ export const AdminSettingsPage: React.FC = () => {
       toast.error('Failed to sync to cloud: ' + (err?.message || 'Unknown error'), { id: 'cloud-sync' });
     } finally {
       setIsSyncingCloud(false);
+    }
+  };
+
+  const handlePullAllFromCloud = async () => {
+    try {
+      setIsPullingCloud(true);
+      toast.loading('Fetching latest data directly from Firestore Cloud...', { id: 'cloud-pull' });
+      const result = await dataStore.pullAllRemoteDataFromFirestore();
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to pull cloud data.');
+      }
+      toast.success(
+        `Successfully retrieved ${result.count} documents from Cloud! Local cache updated and all views refreshed.`,
+        { id: 'cloud-pull' }
+      );
+    } catch (err: any) {
+      console.error('Cloud pull error:', err);
+      toast.error('Failed to pull from cloud: ' + (err?.message || 'Unknown error'), { id: 'cloud-pull' });
+    } finally {
+      setIsPullingCloud(false);
+    }
+  };
+
+  const handleRunDiagnostics = async () => {
+    setShowDiagnosticsModal(true);
+    setLoadingDiagnostics(true);
+    try {
+      const diag = await dataStore.getCloudSyncDiagnostics();
+      setDiagnosticsData(diag);
+    } catch (err: any) {
+      console.error('Diagnostics error:', err);
+      toast.error('Diagnostics failed: ' + (err?.message || 'Unknown error'));
+    } finally {
+      setLoadingDiagnostics(false);
     }
   };
 
@@ -410,11 +461,30 @@ export const AdminSettingsPage: React.FC = () => {
           <button
             type="button"
             onClick={handleSyncAllToCloud}
-            disabled={isSyncingCloud}
+            disabled={isSyncingCloud || isPullingCloud}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-xs font-semibold text-emerald-800 shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+            title="Upload and merge all local changes into Firestore Cloud"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isSyncingCloud ? 'animate-spin' : ''}`} />
-            {isSyncingCloud ? 'Syncing...' : 'Sync to Cloud (Vercel)'}
+            <CloudUpload className={`w-3.5 h-3.5 ${isSyncingCloud ? 'animate-bounce' : ''}`} />
+            {isSyncingCloud ? 'Pushing...' : 'Push to Cloud'}
+          </button>
+          <button
+            type="button"
+            onClick={handlePullAllFromCloud}
+            disabled={isSyncingCloud || isPullingCloud}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-sky-300 bg-sky-50 hover:bg-sky-100 text-xs font-semibold text-sky-800 shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+            title="Retrieve latest authoritative data from Firestore Cloud"
+          >
+            <CloudDownload className={`w-3.5 h-3.5 ${isPullingCloud ? 'animate-bounce' : ''}`} />
+            {isPullingCloud ? 'Pulling...' : 'Pull from Cloud'}
+          </button>
+          <button
+            type="button"
+            onClick={handleRunDiagnostics}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 shadow-2xs transition-colors cursor-pointer"
+            title="Inspect Firestore connection health, live record counts, and Vercel parity"
+          >
+            <Activity className="w-3.5 h-3.5 text-purple-600" /> Diagnostics
           </button>
           <button
             type="button"
@@ -422,7 +492,7 @@ export const AdminSettingsPage: React.FC = () => {
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 shadow-2xs transition-colors cursor-pointer"
             title="Download complete system data including users, lessons, quizzes, submissions, inquiries, and settings"
           >
-            <HardDriveDownload className="w-3.5 h-3.5 text-blue-600" /> Export System Data
+            <HardDriveDownload className="w-3.5 h-3.5 text-blue-600" /> Export Data
           </button>
           <button
             type="button"
@@ -430,7 +500,7 @@ export const AdminSettingsPage: React.FC = () => {
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 shadow-2xs transition-colors cursor-pointer"
             title="Upload and restore full system data from a JSON backup"
           >
-            <HardDriveUpload className="w-3.5 h-3.5 text-emerald-600" /> Import System Data
+            <HardDriveUpload className="w-3.5 h-3.5 text-emerald-600" /> Import Data
           </button>
           <button
             type="button"
@@ -443,7 +513,7 @@ export const AdminSettingsPage: React.FC = () => {
       </div>
 
       {/* Cloud & Vercel Real-time Sync Status Banner */}
-      <div className="bg-gradient-to-r from-slate-900 via-[#0F2A4A] to-slate-900 rounded-xl p-4 text-white shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border border-slate-800">
+      <div className="bg-gradient-to-r from-slate-900 via-[#0F2A4A] to-slate-900 rounded-xl p-4 text-white shadow-sm flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 border border-slate-800">
         <div className="flex items-start gap-3">
           <div className="p-2.5 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
             <CheckCircle2 className="w-5 h-5" />
@@ -454,9 +524,12 @@ export const AdminSettingsPage: React.FC = () => {
               <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-400/20 text-emerald-300 border border-emerald-400/30">
                 Connected
               </span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-slate-800 text-slate-300 border border-slate-700">
+                DB: ai-studio-prepzone
+              </span>
             </div>
             <p className="text-xs text-slate-300 mt-1">
-              Settings, logo branding, and uploaded materials sync instantaneously with{' '}
+              Settings, logo branding, curriculum, questions, and inquiries synchronize bi-directionally with{' '}
               <a
                 href="https://prepzone-nine.vercel.app"
                 target="_blank"
@@ -466,20 +539,42 @@ export const AdminSettingsPage: React.FC = () => {
                 prepzone-nine.vercel.app
                 <Globe className="w-3 h-3 inline" />
               </a>
-              {' '}via Firestore database <span className="font-mono text-emerald-200">ai-studio-prepzone-...</span>
+              {' '}via Firestore database <span className="font-mono text-emerald-200">ai-studio-prepzone-aa3c7d88-f6dc-41ae-a20b-c6ca87ada9f5</span>
             </p>
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={handleSyncAllToCloud}
-          disabled={isSyncingCloud}
-          className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs transition-colors shrink-0 disabled:opacity-50 cursor-pointer"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${isSyncingCloud ? 'animate-spin' : ''}`} />
-          {isSyncingCloud ? 'Synchronizing Cloud...' : 'Push All Local Data to Cloud'}
-        </button>
+        <div className="flex items-center gap-2 flex-wrap w-full lg:w-auto shrink-0">
+          <button
+            type="button"
+            onClick={handleSyncAllToCloud}
+            disabled={isSyncingCloud || isPullingCloud}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs transition-colors shrink-0 disabled:opacity-50 cursor-pointer"
+            title="Upload local changes to Firestore Cloud"
+          >
+            <CloudUpload className={`w-3.5 h-3.5 ${isSyncingCloud ? 'animate-bounce' : ''}`} />
+            {isSyncingCloud ? 'Pushing...' : 'Push to Cloud'}
+          </button>
+          <button
+            type="button"
+            onClick={handlePullAllFromCloud}
+            disabled={isSyncingCloud || isPullingCloud}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold shadow-xs transition-colors shrink-0 disabled:opacity-50 cursor-pointer"
+            title="Fetch latest cloud documents from Firestore into this browser"
+          >
+            <CloudDownload className={`w-3.5 h-3.5 ${isPullingCloud ? 'animate-bounce' : ''}`} />
+            {isPullingCloud ? 'Pulling...' : 'Pull from Cloud'}
+          </button>
+          <button
+            type="button"
+            onClick={handleRunDiagnostics}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors shrink-0 cursor-pointer"
+            title="Check live document parity between local storage and cloud database"
+          >
+            <Activity className="w-3.5 h-3.5 text-purple-400" />
+            Diagnostics
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -1766,6 +1861,191 @@ export const AdminSettingsPage: React.FC = () => {
                   </>
                 )}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cloud Sync Diagnostics & Vercel Guide Modal */}
+      {showDiagnosticsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-slate-200 overflow-hidden my-8">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-900 text-white">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                  <Activity className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Cloud Sync Diagnostics & Vercel Parity</h3>
+                  <p className="text-xs text-slate-300">Live inspection of Firestore database and deployment connectivity</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDiagnosticsModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5 max-h-[80vh] overflow-y-auto">
+              {/* Connection Status Box */}
+              <div className="p-4 rounded-xl border border-slate-200 bg-slate-50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-700">Firestore Connection:</span>
+                    {loadingDiagnostics ? (
+                      <span className="inline-flex items-center gap-1 text-xs text-amber-600 font-semibold">
+                        <RefreshCw className="w-3 h-3 animate-spin" /> Testing latency...
+                      </span>
+                    ) : diagnosticsData?.reachable ? (
+                      <span className="inline-flex items-center gap-1 text-xs text-emerald-700 font-semibold bg-emerald-100 px-2 py-0.5 rounded-full">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Operational ({diagnosticsData.latencyMs}ms)
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-xs text-rose-700 font-semibold bg-rose-100 px-2 py-0.5 rounded-full">
+                        <AlertTriangle className="w-3.5 h-3.5 text-rose-600" /> Unreachable / Offline
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-1 space-y-0.5 font-mono">
+                    <div>Database: <span className="text-slate-800 font-bold">ai-studio-prepzone-aa3c7d88-f6dc-41ae-a20b-c6ca87ada9f5</span></div>
+                    <div>Project: <span className="text-slate-800">gen-lang-client-0986164683</span></div>
+                    <div className="flex items-center gap-1">
+                      <span>Vercel Site:</span>
+                      <a
+                        href="https://prepzone-nine.vercel.app"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-emerald-700 hover:underline font-bold inline-flex items-center gap-0.5"
+                      >
+                        prepzone-nine.vercel.app <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleRunDiagnostics}
+                  disabled={loadingDiagnostics}
+                  className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-xs font-semibold text-slate-700 transition-colors shrink-0 cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3 h-3 inline mr-1.5 ${loadingDiagnostics ? 'animate-spin' : ''}`} />
+                  Re-test
+                </button>
+              </div>
+
+              {/* Parity Table */}
+              <div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">
+                  Collection Parity Inspector (Local vs Cloud)
+                </h4>
+                <div className="border border-slate-200 rounded-xl overflow-hidden text-xs">
+                  <table className="w-full text-left border-collapse">
+                    <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                      <tr>
+                        <th className="py-2.5 px-3">Collection</th>
+                        <th className="py-2.5 px-3 text-center">Local Browser</th>
+                        <th className="py-2.5 px-3 text-center">Cloud Firestore</th>
+                        <th className="py-2.5 px-3 text-center">Parity Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {[
+                        { key: 'settings', label: 'School Settings' },
+                        { key: 'lessons', label: 'Lesson Notes' },
+                        { key: 'quizzes', label: 'Quizzes & Tests' },
+                        { key: 'classes', label: 'Classes & Streams' },
+                        { key: 'levels', label: 'Academic Levels' },
+                        { key: 'subjects', label: 'Academic Subjects' },
+                        { key: 'users', label: 'User Profiles & Superuser' },
+                        { key: 'submissions', label: 'Student Submissions' },
+                        { key: 'inquiries', label: 'Student Inquiries' },
+                        { key: 'cannedResponses', label: 'Canned Responses' },
+                        { key: 'notifications', label: 'Announcements' },
+                      ].map((item) => {
+                        const localVal = diagnosticsData?.localCounts?.[item.key] ?? '-';
+                        const cloudVal = diagnosticsData?.cloudCounts?.[item.key] ?? '-';
+                        const matches = localVal === cloudVal;
+
+                        return (
+                          <tr key={item.key} className="hover:bg-slate-50/70">
+                            <td className="py-2 px-3 font-medium text-slate-800">{item.label}</td>
+                            <td className="py-2 px-3 text-center font-mono font-bold text-slate-700">{localVal}</td>
+                            <td className="py-2 px-3 text-center font-mono font-bold text-emerald-700">{cloudVal}</td>
+                            <td className="py-2 px-3 text-center">
+                              {loadingDiagnostics ? (
+                                <span className="text-slate-400">checking...</span>
+                              ) : matches ? (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                                  <Check className="w-3 h-3" /> In Sync
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                                  <AlertTriangle className="w-3 h-3" /> Delta
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Vercel Deployment & Code Synchronization Guide */}
+              <div className="p-4 rounded-xl border border-blue-200 bg-blue-50/60 text-xs text-blue-950 space-y-2">
+                <h4 className="font-bold text-blue-900 flex items-center gap-1.5">
+                  <Globe className="w-4 h-4 text-blue-700" /> Understanding Data vs Code Synchronization
+                </h4>
+                <div className="space-y-1.5 text-blue-800 leading-relaxed text-[11px]">
+                  <p>
+                    <strong className="text-blue-950">1. Data Synchronization (Real-time & Automatic):</strong> Quizzes, lessons, questions, answers, inquiries, and settings are stored directly in your shared Firestore Cloud database (<span className="font-mono text-blue-900">ai-studio-prepzone-...</span>). Any data saved here or on Vercel updates across both sites in real time without rebuilding the application.
+                  </p>
+                  <p>
+                    <strong className="text-blue-950">2. Code / UI Synchronization:</strong> Changes to source code (such as new navigation links, updated dialogs, or new page features) occur within this AI Studio workspace. If your Vercel deployment (<span className="font-mono">prepzone-nine.vercel.app</span>) was connected to a GitHub repository, your GitHub repository needs the updated source files to rebuild the production UI on Vercel.
+                  </p>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-2 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await handleSyncAllToCloud();
+                      await handleRunDiagnostics();
+                    }}
+                    disabled={isSyncingCloud}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <CloudUpload className="w-3.5 h-3.5" /> Push All Local to Cloud
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await handlePullAllFromCloud();
+                      await handleRunDiagnostics();
+                    }}
+                    disabled={isPullingCloud}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <CloudDownload className="w-3.5 h-3.5" /> Pull All Cloud to Local
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowDiagnosticsModal(false)}
+                  className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-xs font-semibold hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>

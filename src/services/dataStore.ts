@@ -34,6 +34,7 @@ import { assertValidQuiz } from './quizValidator';
 import {
   doc,
   getDoc,
+  getDocs,
   setDoc,
   deleteDoc,
   collection,
@@ -151,12 +152,7 @@ class DataStore {
             const remoteLessons: Lesson[] = [];
             snap.forEach((d) => remoteLessons.push(d.data() as Lesson));
             if (remoteLessons.length > 0) {
-              const localLessons = getStoredOrInit<Lesson[]>(STORAGE_KEYS.LESSONS, INITIAL_LESSONS);
-              const map = new Map<string, Lesson>();
-              localLessons.forEach((l) => map.set(l.id, l));
-              remoteLessons.forEach((l) => map.set(l.id, l));
-              const merged = Array.from(map.values());
-              saveStore(STORAGE_KEYS.LESSONS, merged);
+              saveStore(STORAGE_KEYS.LESSONS, remoteLessons);
               window.dispatchEvent(new CustomEvent('eduform_lessons_updated'));
             }
           }
@@ -172,12 +168,7 @@ class DataStore {
             const remoteQuizzes: Quiz[] = [];
             snap.forEach((d) => remoteQuizzes.push(d.data() as Quiz));
             if (remoteQuizzes.length > 0) {
-              const localQuizzes = getStoredOrInit<Quiz[]>(STORAGE_KEYS.QUIZZES, INITIAL_QUIZZES);
-              const map = new Map<string, Quiz>();
-              localQuizzes.forEach((q) => map.set(q.id, q));
-              remoteQuizzes.forEach((q) => map.set(q.id, q));
-              const merged = Array.from(map.values());
-              saveStore(STORAGE_KEYS.QUIZZES, merged);
+              saveStore(STORAGE_KEYS.QUIZZES, remoteQuizzes);
               window.dispatchEvent(new CustomEvent('eduform_quizzes_updated'));
             }
           }
@@ -185,49 +176,55 @@ class DataStore {
         (err) => console.warn('Quizzes onSnapshot error:', err)
       );
 
-      // 4. Inquiries Real-time Sync
+      // 4. Classes Real-time Sync
       onSnapshot(
-        collection(db, 'inquiries'),
+        collection(db, 'classes'),
         (snap) => {
           if (!snap.empty) {
-            const remoteInquiries: StudentInquiry[] = [];
-            snap.forEach((d) => remoteInquiries.push(d.data() as StudentInquiry));
-            if (remoteInquiries.length > 0) {
-              const local = getStoredOrInit<StudentInquiry[]>(STORAGE_KEYS.INQUIRIES, INITIAL_INQUIRIES);
-              const map = new Map<string, StudentInquiry>();
-              local.forEach((i) => map.set(i.id, i));
-              remoteInquiries.forEach((i) => map.set(i.id, i));
-              const merged = Array.from(map.values());
-              saveStore(STORAGE_KEYS.INQUIRIES, merged);
-              window.dispatchEvent(new CustomEvent('eduform_inquiries_updated'));
+            const remoteClasses: AcademicClass[] = [];
+            snap.forEach((d) => remoteClasses.push(d.data() as AcademicClass));
+            if (remoteClasses.length > 0) {
+              saveStore(STORAGE_KEYS.CLASSES, remoteClasses);
+              window.dispatchEvent(new CustomEvent('eduform_classes_updated'));
             }
           }
         },
-        (err) => console.warn('Inquiries onSnapshot error:', err)
+        (err) => console.warn('Classes onSnapshot error:', err)
       );
 
-      // 5. Canned Responses Real-time Sync
+      // 5. Levels Real-time Sync
       onSnapshot(
-        collection(db, 'cannedResponses'),
+        collection(db, 'levels'),
         (snap) => {
           if (!snap.empty) {
-            const remoteCanned: CannedResponse[] = [];
-            snap.forEach((d) => remoteCanned.push(d.data() as CannedResponse));
-            if (remoteCanned.length > 0) {
-              const local = getStoredOrInit<CannedResponse[]>(STORAGE_KEYS.CANNED_RESPONSES, INITIAL_CANNED_RESPONSES);
-              const map = new Map<string, CannedResponse>();
-              local.forEach((c) => map.set(c.id, c));
-              remoteCanned.forEach((c) => map.set(c.id, c));
-              const merged = Array.from(map.values());
-              saveStore(STORAGE_KEYS.CANNED_RESPONSES, merged);
-              window.dispatchEvent(new CustomEvent('eduform_canned_responses_updated'));
+            const remoteLevels: AcademicLevel[] = [];
+            snap.forEach((d) => remoteLevels.push(d.data() as AcademicLevel));
+            if (remoteLevels.length > 0) {
+              saveStore(STORAGE_KEYS.LEVELS, remoteLevels);
+              window.dispatchEvent(new CustomEvent('eduform_levels_updated'));
             }
           }
         },
-        (err) => console.warn('CannedResponses onSnapshot error:', err)
+        (err) => console.warn('Levels onSnapshot error:', err)
       );
 
-      // 6. Users Real-time Sync
+      // 6. Subjects Real-time Sync
+      onSnapshot(
+        collection(db, 'subjects'),
+        (snap) => {
+          if (!snap.empty) {
+            const remoteSubjects: Subject[] = [];
+            snap.forEach((d) => remoteSubjects.push(d.data() as Subject));
+            if (remoteSubjects.length > 0) {
+              saveStore(STORAGE_KEYS.SUBJECTS, remoteSubjects);
+              window.dispatchEvent(new CustomEvent('eduform_subjects_updated'));
+            }
+          }
+        },
+        (err) => console.warn('Subjects onSnapshot error:', err)
+      );
+
+      // 7. Users Real-time Sync
       onSnapshot(
         collection(db, 'users'),
         (snap) => {
@@ -235,20 +232,285 @@ class DataStore {
             const remoteUsers: UserProfile[] = [];
             snap.forEach((d) => remoteUsers.push(d.data() as UserProfile));
             if (remoteUsers.length > 0) {
-              const localUsers = getStoredOrInit<UserProfile[]>(STORAGE_KEYS.USERS, INITIAL_USERS);
-              const map = new Map<string, UserProfile>();
-              localUsers.forEach((u) => map.set(u.uid, u));
-              remoteUsers.forEach((u) => map.set(u.uid, u));
-              const merged = Array.from(map.values());
-              saveStore(STORAGE_KEYS.USERS, merged);
+              const hasDev = remoteUsers.some(
+                (u) => u.uid === DEVELOPER_USER.uid || u.usernameLower === 'developer'
+              );
+              const finalUsers = hasDev ? remoteUsers : [DEVELOPER_USER, ...remoteUsers];
+              saveStore(STORAGE_KEYS.USERS, finalUsers);
               window.dispatchEvent(new CustomEvent('eduform_users_updated'));
             }
           }
         },
         (err) => console.warn('Users onSnapshot error:', err)
       );
+
+      // 8. Submissions Real-time Sync
+      onSnapshot(
+        collection(db, 'submissions'),
+        (snap) => {
+          if (!snap.empty) {
+            const remoteSubmissions: Submission[] = [];
+            snap.forEach((d) => remoteSubmissions.push(d.data() as Submission));
+            if (remoteSubmissions.length > 0) {
+              saveStore(STORAGE_KEYS.SUBMISSIONS, remoteSubmissions);
+              window.dispatchEvent(new CustomEvent('eduform_submissions_updated'));
+            }
+          }
+        },
+        (err) => console.warn('Submissions onSnapshot error:', err)
+      );
+
+      // 9. Inquiries Real-time Sync
+      onSnapshot(
+        collection(db, 'inquiries'),
+        (snap) => {
+          if (!snap.empty) {
+            const remoteInquiries: StudentInquiry[] = [];
+            snap.forEach((d) => remoteInquiries.push(d.data() as StudentInquiry));
+            if (remoteInquiries.length > 0) {
+              saveStore(STORAGE_KEYS.INQUIRIES, remoteInquiries);
+              window.dispatchEvent(new CustomEvent('eduform_inquiries_updated'));
+            }
+          }
+        },
+        (err) => console.warn('Inquiries onSnapshot error:', err)
+      );
+
+      // 10. Canned Responses Real-time Sync
+      onSnapshot(
+        collection(db, 'cannedResponses'),
+        (snap) => {
+          if (!snap.empty) {
+            const remoteCanned: CannedResponse[] = [];
+            snap.forEach((d) => remoteCanned.push(d.data() as CannedResponse));
+            if (remoteCanned.length > 0) {
+              saveStore(STORAGE_KEYS.CANNED_RESPONSES, remoteCanned);
+              window.dispatchEvent(new CustomEvent('eduform_canned_responses_updated'));
+            }
+          }
+        },
+        (err) => console.warn('CannedResponses onSnapshot error:', err)
+      );
+
+      // 11. Notifications Real-time Sync
+      onSnapshot(
+        collection(db, 'notifications'),
+        (snap) => {
+          if (!snap.empty) {
+            const remoteNotifs: AppNotification[] = [];
+            snap.forEach((d) => remoteNotifs.push(d.data() as AppNotification));
+            if (remoteNotifs.length > 0) {
+              saveStore(STORAGE_KEYS.NOTIFICATIONS, remoteNotifs);
+              window.dispatchEvent(new CustomEvent('eduform_notifications_updated'));
+            }
+          }
+        },
+        (err) => console.warn('Notifications onSnapshot error:', err)
+      );
+
+      // Perform a background one-time full hydration pull to ensure immediate parity with Cloud/Vercel
+      setTimeout(() => {
+        this.pullAllRemoteDataFromFirestore().catch((err) =>
+          console.warn('Initial cloud hydration pull deferred:', err)
+        );
+      }, 100);
     } catch (e) {
       console.warn('Real-time Firestore synchronization setup error:', e);
+    }
+  }
+
+  /**
+   * Directly pulls the latest authoritative data for all 11 collections from Firestore,
+   * updates the local store, and dispatches UI update events.
+   * Useful when restoring synchronization with Vercel or other devices.
+   */
+  public async pullAllRemoteDataFromFirestore(): Promise<{
+    success: boolean;
+    count: number;
+    details: Record<string, number>;
+    error?: string;
+  }> {
+    const details: Record<string, number> = {
+      settings: 0,
+      lessons: 0,
+      quizzes: 0,
+      classes: 0,
+      levels: 0,
+      subjects: 0,
+      users: 0,
+      submissions: 0,
+      inquiries: 0,
+      cannedResponses: 0,
+      notifications: 0,
+    };
+    let totalDocs = 0;
+
+    try {
+      // 1. Settings
+      try {
+        const settingsSnap = await getDoc(doc(db, 'settings', 'global'));
+        if (settingsSnap.exists()) {
+          const remoteSettings = settingsSnap.data() as SystemSettings;
+          if (remoteSettings && remoteSettings.appName) {
+            saveStore(STORAGE_KEYS.SETTINGS, remoteSettings);
+            document.documentElement.setAttribute('data-theme', remoteSettings.themeId || 'oxford');
+            if (remoteSettings.appName) {
+              document.title = `${remoteSettings.appName} | ${remoteSettings.tagline || 'School Assessment System'}`;
+            }
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('eduform_settings_updated', { detail: remoteSettings }));
+            }
+            details.settings = 1;
+            totalDocs++;
+          }
+        }
+      } catch (e) {
+        console.warn('Pull settings error:', e);
+      }
+
+      // Helper for collection pulls
+      const pullColl = async <T extends { id?: string; uid?: string }>(
+        collName: string,
+        storageKey: string,
+        eventName: string,
+        isUsers = false
+      ) => {
+        try {
+          const snap = await getDocs(collection(db, collName));
+          if (!snap.empty) {
+            const items: T[] = [];
+            snap.forEach((d) => items.push(d.data() as T));
+            if (isUsers) {
+              const userList = items as unknown as UserProfile[];
+              const hasDev = userList.some(
+                (u) => u.uid === DEVELOPER_USER.uid || u.usernameLower === 'developer'
+              );
+              const finalUsers = hasDev ? userList : [DEVELOPER_USER, ...userList];
+              saveStore(storageKey, finalUsers);
+            } else {
+              saveStore(storageKey, items);
+            }
+            details[collName] = items.length;
+            totalDocs += items.length;
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent(eventName));
+            }
+          }
+        } catch (e) {
+          console.warn(`Pull collection ${collName} error:`, e);
+        }
+      };
+
+      await Promise.all([
+        pullColl<Lesson>('lessons', STORAGE_KEYS.LESSONS, 'eduform_lessons_updated'),
+        pullColl<Quiz>('quizzes', STORAGE_KEYS.QUIZZES, 'eduform_quizzes_updated'),
+        pullColl<AcademicClass>('classes', STORAGE_KEYS.CLASSES, 'eduform_classes_updated'),
+        pullColl<AcademicLevel>('levels', STORAGE_KEYS.LEVELS, 'eduform_levels_updated'),
+        pullColl<Subject>('subjects', STORAGE_KEYS.SUBJECTS, 'eduform_subjects_updated'),
+        pullColl<UserProfile>('users', STORAGE_KEYS.USERS, 'eduform_users_updated', true),
+        pullColl<Submission>('submissions', STORAGE_KEYS.SUBMISSIONS, 'eduform_submissions_updated'),
+        pullColl<StudentInquiry>('inquiries', STORAGE_KEYS.INQUIRIES, 'eduform_inquiries_updated'),
+        pullColl<CannedResponse>('cannedResponses', STORAGE_KEYS.CANNED_RESPONSES, 'eduform_canned_responses_updated'),
+        pullColl<AppNotification>('notifications', STORAGE_KEYS.NOTIFICATIONS, 'eduform_notifications_updated'),
+      ]);
+
+      return { success: true, count: totalDocs, details };
+    } catch (err: any) {
+      return { success: false, count: totalDocs, details, error: err?.message || String(err) };
+    }
+  }
+
+  /**
+   * Diagnostic test checking connection to Firestore and counting docs locally vs on Cloud
+   */
+  public async getCloudSyncDiagnostics(): Promise<{
+    reachable: boolean;
+    latencyMs: number;
+    databaseId: string;
+    projectId: string;
+    vercelUrl: string;
+    cloudCounts: Record<string, number>;
+    localCounts: Record<string, number>;
+    error?: string;
+  }> {
+    const startTime = Date.now();
+    const localCounts: Record<string, number> = {
+      settings: 1,
+      lessons: this.getLessons().length,
+      quizzes: this.getQuizzes().length,
+      classes: this.getClasses().length,
+      levels: this.getLevels().length,
+      subjects: this.getSubjects().length,
+      users: this.getUsers().length,
+      submissions: this.getSubmissions().length,
+      inquiries: this.getInquiries().length,
+      cannedResponses: this.getCannedResponses().length,
+      notifications: this.getNotifications().length,
+    };
+
+    const cloudCounts: Record<string, number> = {
+      settings: 0,
+      lessons: 0,
+      quizzes: 0,
+      classes: 0,
+      levels: 0,
+      subjects: 0,
+      users: 0,
+      submissions: 0,
+      inquiries: 0,
+      cannedResponses: 0,
+      notifications: 0,
+    };
+
+    try {
+      const pingDoc = await getDoc(doc(db, 'settings', 'global'));
+      cloudCounts.settings = pingDoc.exists() ? 1 : 0;
+      const latencyMs = Date.now() - startTime;
+
+      const colls = [
+        'lessons',
+        'quizzes',
+        'classes',
+        'levels',
+        'subjects',
+        'users',
+        'submissions',
+        'inquiries',
+        'cannedResponses',
+        'notifications',
+      ];
+
+      await Promise.all(
+        colls.map(async (c) => {
+          try {
+            const snap = await getDocs(collection(db, c));
+            cloudCounts[c] = snap.size;
+          } catch (e) {
+            console.warn(`Diagnostics count for ${c} failed:`, e);
+          }
+        })
+      );
+
+      return {
+        reachable: true,
+        latencyMs,
+        databaseId: 'ai-studio-prepzone-aa3c7d88-f6dc-41ae-a20b-c6ca87ada9f5',
+        projectId: 'gen-lang-client-0986164683',
+        vercelUrl: 'https://prepzone-nine.vercel.app',
+        cloudCounts,
+        localCounts,
+      };
+    } catch (err: any) {
+      return {
+        reachable: false,
+        latencyMs: Date.now() - startTime,
+        databaseId: 'ai-studio-prepzone-aa3c7d88-f6dc-41ae-a20b-c6ca87ada9f5',
+        projectId: 'gen-lang-client-0986164683',
+        vercelUrl: 'https://prepzone-nine.vercel.app',
+        cloudCounts,
+        localCounts,
+        error: err?.message || String(err),
+      };
     }
   }
 
@@ -1027,6 +1289,11 @@ class DataStore {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('eduform_users_updated', { detail: { uid, deleted: true } }));
     }
+    try {
+      deleteDoc(doc(db, 'users', uid)).catch((err) =>
+        console.warn('Async user delete from Firestore deferred:', err)
+      );
+    } catch {}
     return true;
   }
 
@@ -1058,11 +1325,27 @@ class DataStore {
       levels.push(level);
     }
     saveStore(STORAGE_KEYS.LEVELS, levels);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('eduform_levels_updated'));
+    }
+    try {
+      setDoc(doc(db, 'levels', level.id), sanitizeForFirestore(level), { merge: true }).catch((err) =>
+        console.warn('Async level save to Firestore deferred:', err)
+      );
+    } catch {}
   }
 
   public deleteLevel(id: string): void {
     const levels = this.getLevels().filter((l) => l.id !== id);
     saveStore(STORAGE_KEYS.LEVELS, levels);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('eduform_levels_updated'));
+    }
+    try {
+      deleteDoc(doc(db, 'levels', id)).catch((err) =>
+        console.warn('Async level delete from Firestore deferred:', err)
+      );
+    } catch {}
   }
 
   // --- Classes ---
@@ -1083,6 +1366,14 @@ class DataStore {
       classes.unshift(cls);
     }
     saveStore(STORAGE_KEYS.CLASSES, classes);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('eduform_classes_updated'));
+    }
+    try {
+      setDoc(doc(db, 'classes', cls.id), sanitizeForFirestore(cls), { merge: true }).catch((err) =>
+        console.warn('Async class save to Firestore deferred:', err)
+      );
+    } catch {}
   }
 
   public deleteClass(id: string): void {
@@ -1106,6 +1397,15 @@ class DataStore {
       return l;
     });
     saveStore(STORAGE_KEYS.LESSONS, lessons);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('eduform_classes_updated'));
+    }
+    try {
+      deleteDoc(doc(db, 'classes', id)).catch((err) =>
+        console.warn('Async class delete from Firestore deferred:', err)
+      );
+    } catch {}
   }
 
   // --- Subjects ---
@@ -1126,6 +1426,14 @@ class DataStore {
       subjects.unshift(subj);
     }
     saveStore(STORAGE_KEYS.SUBJECTS, subjects);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('eduform_subjects_updated'));
+    }
+    try {
+      setDoc(doc(db, 'subjects', subj.id), sanitizeForFirestore(subj), { merge: true }).catch((err) =>
+        console.warn('Async subject save to Firestore deferred:', err)
+      );
+    } catch {}
   }
 
   public deleteSubject(id: string): void {
@@ -1149,6 +1457,15 @@ class DataStore {
       return u;
     });
     saveStore(STORAGE_KEYS.USERS, users);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('eduform_subjects_updated'));
+    }
+    try {
+      deleteDoc(doc(db, 'subjects', id)).catch((err) =>
+        console.warn('Async subject delete from Firestore deferred:', err)
+      );
+    } catch {}
   }
 
   // --- Lessons ---
@@ -1185,17 +1502,9 @@ class DataStore {
       }
     }
 
-    for (const initL of INITIAL_LESSONS) {
-      const existing = lessons.find((l) => l.id === initL.id);
-      if (!existing) {
-        lessons.push(initL);
-        modified = true;
-      } else if (!existing.videoUrl && initL.videoUrl) {
-        existing.videoUrl = initL.videoUrl;
-        existing.videoType = initL.videoType;
-        existing.videoTitle = initL.videoTitle;
-        modified = true;
-      }
+    if (lessons.length === 0) {
+      lessons.push(...INITIAL_LESSONS);
+      modified = true;
     }
     if (modified) {
       saveStore(STORAGE_KEYS.LESSONS, lessons);
@@ -1277,11 +1586,9 @@ class DataStore {
       return q;
     });
 
-    for (const initQ of INITIAL_QUIZZES) {
-      if (!quizzes.some((q) => q.id === initQ.id)) {
-        quizzes.push(initQ);
-        modified = true;
-      }
+    if (quizzes.length === 0) {
+      quizzes.push(...INITIAL_QUIZZES);
+      modified = true;
     }
     if (modified) {
       saveStore(STORAGE_KEYS.QUIZZES, quizzes);
@@ -1316,18 +1623,18 @@ class DataStore {
     }
     saveStore(STORAGE_KEYS.QUIZZES, quizzes);
 
-    // Sync to Firestore if online / enabled
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('eduform_quizzes_updated'));
+    }
+
+    // Sync to Firestore immediately with size safeguard
     try {
-      import('@/src/lib/firebase').then(({ db, sanitizeForFirestore }) => {
-        import('firebase/firestore').then(({ doc, setDoc }) => {
-          const payload = sanitizeForFirestore(normalizedQuiz);
-          setDoc(doc(db, 'quizzes', normalizedQuiz.id), payload).catch((err) => {
-            console.warn('Firestore quiz sync deferred/offline:', err);
-          });
-        });
+      const payload = enforceFirestoreSizeLimit(normalizedQuiz);
+      setDoc(doc(db, 'quizzes', normalizedQuiz.id), payload, { merge: true }).catch((err) => {
+        console.warn('Firestore quiz sync deferred/offline:', err);
       });
-    } catch {
-      // safe fallback
+    } catch (e) {
+      console.warn('Firestore quiz sync error:', e);
     }
   }
 
@@ -1350,11 +1657,9 @@ class DataStore {
   public getSubmissions(): Submission[] {
     const subs = getStoredOrInit<Submission[]>(STORAGE_KEYS.SUBMISSIONS, INITIAL_SUBMISSIONS);
     let modified = false;
-    for (const initSub of INITIAL_SUBMISSIONS) {
-      if (!subs.some((s) => s.id === initSub.id)) {
-        subs.push(initSub);
-        modified = true;
-      }
+    if (subs.length === 0) {
+      subs.push(...INITIAL_SUBMISSIONS);
+      modified = true;
     }
     if (modified) {
       saveStore(STORAGE_KEYS.SUBMISSIONS, subs);
@@ -1395,18 +1700,18 @@ class DataStore {
     }
     saveStore(STORAGE_KEYS.SUBMISSIONS, subs);
 
-    // Sync to Firestore if online / enabled
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('eduform_submissions_updated'));
+    }
+
+    // Sync to Firestore immediately with size safeguard
     try {
-      import('@/src/lib/firebase').then(({ db, sanitizeForFirestore }) => {
-        import('firebase/firestore').then(({ doc, setDoc }) => {
-          const payload = sanitizeForFirestore(submission);
-          setDoc(doc(db, 'submissions', submission.id), payload).catch((err) => {
-            console.warn('Firestore submission sync deferred/offline:', err);
-          });
-        });
+      const payload = enforceFirestoreSizeLimit(submission);
+      setDoc(doc(db, 'submissions', submission.id), payload, { merge: true }).catch((err) => {
+        console.warn('Firestore submission sync deferred/offline:', err);
       });
-    } catch {
-      // safe fallback
+    } catch (e) {
+      console.warn('Submission sync error:', e);
     }
 
     return true;
@@ -1479,11 +1784,27 @@ class DataStore {
       notifs.unshift(notif);
     }
     saveStore(STORAGE_KEYS.NOTIFICATIONS, notifs);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('eduform_notifications_updated'));
+    }
+    try {
+      setDoc(doc(db, 'notifications', notif.id), sanitizeForFirestore(notif), { merge: true }).catch((err) =>
+        console.warn('Async notification save to Firestore deferred:', err)
+      );
+    } catch {}
   }
 
   public deleteNotification(id: string): void {
     const notifs = this.getNotifications().filter((n) => n.id !== id);
     saveStore(STORAGE_KEYS.NOTIFICATIONS, notifs);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('eduform_notifications_updated'));
+    }
+    try {
+      deleteDoc(doc(db, 'notifications', id)).catch((err) =>
+        console.warn('Async notification delete from Firestore deferred:', err)
+      );
+    } catch {}
   }
 
   // --- Notification Read Tracking ---
@@ -1603,14 +1924,8 @@ class DataStore {
   // --- Student Inquiries & Teacher Q&A ---
   public getInquiries(): StudentInquiry[] {
     const inquiries = getStoredOrInit<StudentInquiry[]>(STORAGE_KEYS.INQUIRIES, INITIAL_INQUIRIES);
-    let modified = false;
-    for (const initInq of INITIAL_INQUIRIES) {
-      if (!inquiries.some((i) => i.id === initInq.id)) {
-        inquiries.push(initInq);
-        modified = true;
-      }
-    }
-    if (modified) {
+    if (inquiries.length === 0) {
+      inquiries.push(...INITIAL_INQUIRIES);
       saveStore(STORAGE_KEYS.INQUIRIES, inquiries);
     }
     return inquiries;
@@ -1719,18 +2034,14 @@ class DataStore {
       window.dispatchEvent(new CustomEvent('eduform_inquiries_updated', { detail: inquiry }));
     }
 
-    // Sync to Firestore if online
+    // Sync to Firestore immediately with size safeguard
     try {
-      import('@/src/lib/firebase').then(({ db, sanitizeForFirestore }) => {
-        import('firebase/firestore').then(({ doc, setDoc }) => {
-          const payload = sanitizeForFirestore(inquiry);
-          setDoc(doc(db, 'inquiries', inquiry.id), payload).catch((err) => {
-            console.warn('Firestore inquiry sync deferred/offline:', err);
-          });
-        });
+      const payload = enforceFirestoreSizeLimit(inquiry);
+      setDoc(doc(db, 'inquiries', inquiry.id), payload, { merge: true }).catch((err) => {
+        console.warn('Firestore inquiry sync deferred/offline:', err);
       });
-    } catch {
-      // safe fallback
+    } catch (e) {
+      console.warn('Firestore inquiry sync error:', e);
     }
   }
 
@@ -1846,6 +2157,13 @@ class DataStore {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('eduform_inquiries_updated'));
     }
+    try {
+      deleteDoc(doc(db, 'inquiries', id)).catch((err) => {
+        console.warn('Failed to delete inquiry from Firestore:', err);
+      });
+    } catch (e) {
+      console.warn('Firestore inquiry delete deferred:', e);
+    }
   }
 
   // --- Inquiry Read Receipts & State ---
@@ -1861,6 +2179,7 @@ class DataStore {
     if (!userReads.has(inquiryId)) {
       userReads.add(inquiryId);
       all[userId] = Array.from(userReads);
+      saveStore(STORAGE_KEYS.INQUIRIES, this.getInquiries());
       saveStore(STORAGE_KEYS.INQUIRY_READS, all);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(
@@ -1912,11 +2231,9 @@ class DataStore {
       INITIAL_CANNED_RESPONSES
     );
     let modified = false;
-    for (const initCanned of INITIAL_CANNED_RESPONSES) {
-      if (!stored.some((c) => c.id === initCanned.id)) {
-        stored.push(initCanned);
-        modified = true;
-      }
+    if (stored.length === 0) {
+      stored.push(...INITIAL_CANNED_RESPONSES);
+      modified = true;
     }
     if (modified) {
       saveStore(STORAGE_KEYS.CANNED_RESPONSES, stored);
