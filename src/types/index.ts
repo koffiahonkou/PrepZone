@@ -16,6 +16,8 @@ export interface UserProfile {
   createdBy: string;
   createdAt: string;
   lastLoginAt?: string | null;
+  deactivationDate?: string | null;
+  autoDeactivateAt?: string | null;
 }
 
 export interface AcademicLevel {

@@ -42,6 +42,11 @@ import {
 } from 'firebase/firestore';
 import { db, sanitizeForFirestore, enforceFirestoreSizeLimit } from '@/src/lib/firebase';
 import { uploadDataUrlToStorage } from '@/src/services/storageService';
+import {
+  isDeveloperAccount,
+  isAutoDeactivationDue,
+  getDeactivationThreshold,
+} from '@/src/utils/accountLifecycle';
 
 const STORAGE_KEYS = {
   USERS: 'eduform_store_users',
@@ -237,6 +242,8 @@ class DataStore {
               );
               const finalUsers = hasDev ? remoteUsers : [DEVELOPER_USER, ...remoteUsers];
               saveStore(STORAGE_KEYS.USERS, finalUsers);
+              // Immediately evaluate any scheduled auto-deactivation dates on pulled users
+              this.getUsers();
               window.dispatchEvent(new CustomEvent('eduform_users_updated'));
             }
           }
@@ -314,6 +321,11 @@ class DataStore {
           console.warn('Initial cloud hydration pull deferred:', err)
         );
       }, 100);
+
+      // Periodically check for scheduled user auto-deactivations while app is open
+      setInterval(() => {
+        this.enforceScheduledDeactivations();
+      }, 30_000);
     } catch (e) {
       console.warn('Real-time Firestore synchronization setup error:', e);
     }
@@ -387,6 +399,7 @@ class DataStore {
               );
               const finalUsers = hasDev ? userList : [DEVELOPER_USER, ...userList];
               saveStore(storageKey, finalUsers);
+              this.getUsers();
             } else {
               saveStore(storageKey, items);
             }
@@ -853,6 +866,7 @@ class DataStore {
           saveStore(STORAGE_KEYS.LEVELS, Array.from(map.values()));
         }
         importedCounts.levels = sourceData.levels.length;
+        if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('eduform_levels_updated'));
       }
 
       // 3. Classes
@@ -866,6 +880,7 @@ class DataStore {
           saveStore(STORAGE_KEYS.CLASSES, Array.from(map.values()));
         }
         importedCounts.classes = sourceData.classes.length;
+        if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('eduform_classes_updated'));
       }
 
       // 4. Subjects
@@ -879,6 +894,7 @@ class DataStore {
           saveStore(STORAGE_KEYS.SUBJECTS, Array.from(map.values()));
         }
         importedCounts.subjects = sourceData.subjects.length;
+        if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('eduform_subjects_updated'));
       }
 
       // 5. Lessons
@@ -920,6 +936,7 @@ class DataStore {
           saveStore(STORAGE_KEYS.SUBMISSIONS, Array.from(map.values()));
         }
         importedCounts.submissions = sourceData.submissions.length;
+        if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('eduform_submissions_updated'));
       }
 
       // 8. Inquiries
@@ -947,6 +964,7 @@ class DataStore {
           saveStore(STORAGE_KEYS.CANNED_RESPONSES, Array.from(map.values()));
         }
         importedCounts.cannedResponses = sourceData.cannedResponses.length;
+        if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('eduform_canned_responses_updated'));
       }
 
       // 10. Notifications
@@ -987,10 +1005,17 @@ class DataStore {
                 ...u,
                 role: 'developer' as const,
                 status: 'active' as const,
+                deactivationDate: null,
+                autoDeactivateAt: null,
                 password: u.password || currentDev.password || 'Eduform123!',
               };
             }
-            return u;
+            const threshold = getDeactivationThreshold(u);
+            return {
+              ...u,
+              deactivationDate: threshold,
+              autoDeactivateAt: threshold,
+            };
           });
         }
 
@@ -1033,6 +1058,8 @@ class DataStore {
   public getUsers(): UserProfile[] {
     const rawUsers = getStoredOrInit<UserProfile[]>(STORAGE_KEYS.USERS, INITIAL_USERS);
     let changed = false;
+    const autoDeactivatedUsers: UserProfile[] = [];
+    const nowMs = Date.now();
 
     // Guarantee that the developer superuser account is always present and protected
     const hasDeveloper = rawUsers.some(
@@ -1045,15 +1072,28 @@ class DataStore {
 
     const migrated = rawUsers.map((u) => {
       let userChanged = false;
+      let nextStatus = u.status;
+      let nextRole = u.role;
+      let nextDeactivationDate = getDeactivationThreshold(u);
 
-      // Lock developer superuser properties
-      if (u.uid === DEVELOPER_USER.uid || u.usernameLower === 'developer') {
-        if (u.role !== 'developer' || u.status !== 'active') {
-          u.role = 'developer';
-          u.status = 'active';
+      // Lock developer superuser properties (never allow deactivation)
+      if (isDeveloperAccount(u)) {
+        if (nextRole !== 'developer' || nextStatus !== 'active' || nextDeactivationDate || u.deactivationDate || u.autoDeactivateAt) {
+          nextRole = 'developer';
+          nextStatus = 'active';
+          nextDeactivationDate = null;
+          userChanged = true;
+        }
+      } else {
+        if (u.deactivationDate !== nextDeactivationDate || u.autoDeactivateAt !== nextDeactivationDate) {
+          userChanged = true;
+        }
+        if (nextStatus === 'active' && isAutoDeactivationDue(u, nowMs)) {
+          nextStatus = 'inactive';
           userChanged = true;
         }
       }
+
       let newLevelIds = u.levelIds || [];
       if (newLevelIds.includes('level-jss1') || newLevelIds.includes('level-jss2') || newLevelIds.includes('level-ss1')) {
         newLevelIds = newLevelIds.map((l) => {
@@ -1086,21 +1126,63 @@ class DataStore {
 
       if (userChanged) {
         changed = true;
-        return {
+        const updatedUser: UserProfile = {
           ...u,
+          role: nextRole,
+          status: nextStatus,
+          deactivationDate: nextDeactivationDate,
+          autoDeactivateAt: nextDeactivationDate,
           levelIds: newLevelIds,
           password,
           subjectIds,
         };
+        if (u.status === 'active' && nextStatus === 'inactive' && isAutoDeactivationDue(u, nowMs)) {
+          autoDeactivatedUsers.push(updatedUser);
+        }
+        return updatedUser;
       }
       return u;
     });
 
     if (changed) {
       saveStore(STORAGE_KEYS.USERS, migrated);
+
+      if (autoDeactivatedUsers.length > 0) {
+        autoDeactivatedUsers.forEach((deactivated) => {
+          this.addAuditLog({
+            actorId: 'system',
+            action: 'USER_AUTO_DEACTIVATED',
+            targetType: 'user',
+            targetId: deactivated.uid,
+            meta: {
+              username: deactivated.username,
+              deactivationDate: deactivated.deactivationDate,
+            },
+          });
+          try {
+            const payload = enforceFirestoreSizeLimit(deactivated);
+            setDoc(doc(db, 'users', deactivated.uid), payload, { merge: true }).catch((err) =>
+              console.warn('Async auto-deactivation sync to Firestore deferred:', err)
+            );
+          } catch {
+            // offline fallback
+          }
+        });
+
+        if (typeof window !== 'undefined') {
+          setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('eduform_users_updated'));
+          }, 0);
+        }
+      }
+
       return migrated;
     }
     return rawUsers;
+  }
+
+  public enforceScheduledDeactivations(): UserProfile[] {
+    return this.getUsers();
   }
 
   public getUserById(uid: string): UserProfile | undefined {
@@ -1240,7 +1322,7 @@ class DataStore {
   }
 
   public saveUser(user: UserProfile, actorId?: string): boolean {
-    if (user.uid === DEVELOPER_USER.uid || user.usernameLower === 'developer') {
+    if (isDeveloperAccount(user)) {
       if (actorId && actorId !== DEVELOPER_USER.uid) {
         console.warn('Unauthorized attempt to modify developer account blocked.');
         return false;
@@ -1249,6 +1331,15 @@ class DataStore {
       user.status = 'active';
       user.username = 'developer';
       user.usernameLower = 'developer';
+      user.deactivationDate = null;
+      user.autoDeactivateAt = null;
+    } else {
+      const normalizedThreshold = getDeactivationThreshold(user);
+      user.deactivationDate = normalizedThreshold;
+      user.autoDeactivateAt = normalizedThreshold;
+      if (user.status === 'active' && isAutoDeactivationDue(user)) {
+        user.status = 'inactive';
+      }
     }
 
     const users = this.getUsers();
@@ -2179,7 +2270,6 @@ class DataStore {
     if (!userReads.has(inquiryId)) {
       userReads.add(inquiryId);
       all[userId] = Array.from(userReads);
-      saveStore(STORAGE_KEYS.INQUIRIES, this.getInquiries());
       saveStore(STORAGE_KEYS.INQUIRY_READS, all);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(

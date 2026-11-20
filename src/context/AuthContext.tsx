@@ -6,6 +6,12 @@ import { loginWithUsername, getUserProfile } from '@/src/services/authService';
 import { dataStore } from '@/src/services/dataStore';
 import { DEVELOPER_USER } from '@/src/services/sampleData';
 import { AppError } from '@/src/lib/errors';
+import {
+  isAutoDeactivationDue,
+  getScheduledDeactivationNotice,
+  getDeactivationThreshold,
+} from '@/src/utils/accountLifecycle';
+import { checkAndEnforceUserDeactivationOnLogin } from '@/src/services/userAdminService';
 
 export const DEMO_USERS: Record<string, UserProfile> = {
   developer: DEVELOPER_USER,
@@ -127,7 +133,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (savedUserId) {
       const storedUser = dataStore.getUserById(savedUserId) || DEMO_USERS[savedUserId];
       if (storedUser) {
-        if (storedUser.status === 'active') {
+        if (storedUser.status === 'active' && !isAutoDeactivationDue(storedUser)) {
           setProfile(storedUser);
           setLoading(false);
           return;
@@ -150,12 +156,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           try {
             const userProfile = await getUserProfile(fbUser.uid);
             if (userProfile) {
-              if (userProfile.status === 'inactive') {
+              const { deactivated, profile: enforced } = await checkAndEnforceUserDeactivationOnLogin(userProfile);
+              if (deactivated) {
                 await fbSignOut(auth);
                 setUser(null);
                 setProfile(null);
               } else {
-                setProfile(userProfile);
+                setProfile(enforced);
               }
             }
           } catch {
@@ -178,6 +185,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       clearTimeout(fallbackTimer);
       setLoading(false);
     }
+  }, []);
+
+  // Keep active user profile synchronized with real-time updates & auto-deactivation checks
+  useEffect(() => {
+    const syncActiveProfile = () => {
+      setProfile((prev) => {
+        if (!prev) return prev;
+        const fresh = dataStore.getUserById(prev.uid);
+        if (!fresh) {
+          if (isAutoDeactivationDue(prev) || prev.status === 'inactive') {
+            localStorage.removeItem(LOCAL_STORAGE_DEMO_KEY);
+            return null;
+          }
+          return prev;
+        }
+        if (fresh.status === 'inactive' || isAutoDeactivationDue(fresh)) {
+          localStorage.removeItem(LOCAL_STORAGE_DEMO_KEY);
+          return null;
+        }
+        return fresh;
+      });
+    };
+
+    const handleUsersUpdated = () => {
+      syncActiveProfile();
+    };
+
+    const expiryCheckInterval = setInterval(() => {
+      dataStore.enforceScheduledDeactivations();
+      syncActiveProfile();
+    }, 15_000);
+
+    window.addEventListener('eduform_users_updated', handleUsersUpdated);
+    return () => {
+      clearInterval(expiryCheckInterval);
+      window.removeEventListener('eduform_users_updated', handleUsersUpdated);
+    };
   }, []);
 
   const signIn = async (username: string, password: string): Promise<void> => {
@@ -203,16 +247,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           );
         }
 
-        if (registeredUser.status === 'inactive') {
+        const { deactivated, profile: enforcedUser } = await checkAndEnforceUserDeactivationOnLogin(registeredUser);
+        if (deactivated) {
           throw new AppError(
-            'Your account has been deactivated. Please contact your school administrator.',
+            getScheduledDeactivationNotice(getDeactivationThreshold(enforcedUser)),
             'auth/account-inactive'
           );
         }
 
         const now = new Date().toISOString();
         const updatedUser: UserProfile = {
-          ...registeredUser,
+          ...enforcedUser,
           lastLoginAt: now,
         };
         dataStore.saveUser(updatedUser);
@@ -238,9 +283,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           );
         }
 
-        if (demoProf.status === 'inactive') {
+        if (demoProf.status === 'inactive' || isAutoDeactivationDue(demoProf)) {
           throw new AppError(
-            'Your account has been deactivated. Please contact your school administrator.',
+            getScheduledDeactivationNotice(getDeactivationThreshold(demoProf)),
             'auth/account-inactive'
           );
         }
@@ -275,22 +320,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     identifier: string,
     newPassword: string
   ): Promise<{ success: boolean; error?: string }> => {
-    setLoading(true);
-    try {
-      const result = dataStore.resetUserPassword(identifier, newPassword, profile?.uid);
-      if (!result.success) {
-        return { success: false, error: result.error };
-      }
-
-      // If resetting currently authenticated user, update local profile state
-      if (profile && (result.user?.uid === profile.uid || result.user?.usernameLower === profile.usernameLower)) {
-        setProfile(result.user);
-      }
-
-      return { success: true };
-    } finally {
-      setLoading(false);
+    const result = dataStore.resetUserPassword(identifier, newPassword, profile?.uid);
+    if (!result.success) {
+      return { success: false, error: result.error };
     }
+
+    // If resetting currently authenticated user, update local profile state
+    if (profile && (result.user?.uid === profile.uid || result.user?.usernameLower === profile.usernameLower)) {
+      setProfile(result.user);
+    }
+
+    return { success: true };
   };
 
   const changePassword = async (
@@ -300,20 +340,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!profile) {
       return { success: false, error: 'No active user session found.' };
     }
-    setLoading(true);
-    try {
-      const result = dataStore.changeUserPassword(profile.uid, currentPassword, newPassword);
-      if (!result.success) {
-        return { success: false, error: result.error };
-      }
-      const updatedUser = dataStore.getUserById(profile.uid);
-      if (updatedUser) {
-        setProfile(updatedUser);
-      }
-      return { success: true };
-    } finally {
-      setLoading(false);
+    const result = dataStore.changeUserPassword(profile.uid, currentPassword, newPassword);
+    if (!result.success) {
+      return { success: false, error: result.error };
     }
+    const updatedUser = dataStore.getUserById(profile.uid);
+    if (updatedUser) {
+      setProfile(updatedUser);
+    }
+    return { success: true };
   };
 
   const signOut = async () => {
@@ -348,11 +383,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!demoProf) {
       throw new AppError('Demo account not found.');
     }
-    if (demoProf.status === 'inactive') {
+    if (demoProf.status === 'inactive' || isAutoDeactivationDue(demoProf)) {
       localStorage.removeItem(LOCAL_STORAGE_DEMO_KEY);
       setProfile(null);
       setUser(null);
-      throw new AppError('Your account has been deactivated. Please contact your school administrator.');
+      throw new AppError(getScheduledDeactivationNotice(getDeactivationThreshold(demoProf)));
     }
     localStorage.setItem(LOCAL_STORAGE_DEMO_KEY, demoProf.uid || key);
     setProfile({

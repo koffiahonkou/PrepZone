@@ -17,7 +17,9 @@
         "subjectIds": { "type": "array" },
         "createdBy": { "type": "string" },
         "createdAt": { "type": "string" },
-        "lastLoginAt": { "type": "string" }
+        "lastLoginAt": { "type": "string" },
+        "deactivationDate": { "type": "string", "description": "Optional ISO date or timestamp threshold after which the user account automatically deactivates" },
+        "autoDeactivateAt": { "type": "string", "description": "Optional ISO date or timestamp when user account automatically deactivates" }
       },
       "required": ["uid", "username", "usernameLower", "authEmail", "fullName", "role", "status", "createdBy", "createdAt"]
     },

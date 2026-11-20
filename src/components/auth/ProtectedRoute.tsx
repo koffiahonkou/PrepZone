@@ -1,6 +1,11 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/src/context/AuthContext';
+import {
+  isAutoDeactivationDue,
+  getScheduledDeactivationNotice,
+  getDeactivationThreshold,
+} from '@/src/utils/accountLifecycle';
 
 export const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { profile, loading } = useAuth();
@@ -21,8 +26,14 @@ export const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ childr
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  if (profile.status === 'inactive') {
-    return <Navigate to="/login" state={{ error: 'Your account is deactivated.' }} replace />;
+  if (profile.status === 'inactive' || isAutoDeactivationDue(profile)) {
+    return (
+      <Navigate
+        to="/login"
+        state={{ error: getScheduledDeactivationNotice(getDeactivationThreshold(profile)) }}
+        replace
+      />
+    );
   }
 
   return <>{children}</>;

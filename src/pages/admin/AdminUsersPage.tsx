@@ -23,11 +23,23 @@ import {
   Check,
   Code2,
   ShieldAlert,
+  Calendar,
+  Clock,
 } from 'lucide-react';
 import { useAuth } from '@/src/context/AuthContext';
 import { ChangePasswordModal } from '@/src/components/auth/ChangePasswordModal';
 import { dataStore } from '@/src/services/dataStore';
 import { UserProfile, UserRole, UserStatus, AcademicClass, AcademicLevel, Subject } from '@/src/types';
+import {
+  isDeveloperAccount,
+  isAutoDeactivationDue,
+  getDeactivationThreshold,
+  formatAutoDeactivateDateTime,
+  toDateInputAndTime,
+  combineDateAndTimeToIso,
+  parseDeactivationTimestamp,
+} from '@/src/utils/accountLifecycle';
+import { updateUserAsAdmin, deleteUserAsAdmin } from '@/src/services/userAdminService';
 import { toast } from 'sonner';
 
 export const AdminUsersPage: React.FC = () => {
@@ -75,6 +87,8 @@ export const AdminUsersPage: React.FC = () => {
   const [formSubjectIds, setFormSubjectIds] = useState<string[]>([]);
   const [formPassword, setFormPassword] = useState('Eduform123!');
   const [showModalPassword, setShowModalPassword] = useState(false);
+  const [formAutoDeactivateDate, setFormAutoDeactivateDate] = useState('');
+  const [formAutoDeactivateTime, setFormAutoDeactivateTime] = useState('00:00');
 
   // Delete State
   const [deleteTarget, setDeleteTarget] = useState<UserProfile | null>(null);
@@ -144,15 +158,27 @@ export const AdminUsersPage: React.FC = () => {
   const toggleStatus = (uid: string) => {
     const target = users.find((u) => u.uid === uid);
     if (!target) return;
-    if (target.role === 'developer' || target.uid === 'dev-system-superuser' || target.usernameLower === 'developer') {
+    if (isDeveloperAccount(target)) {
       toast.error('The developer superuser account is permanently active and cannot be deactivated.');
       return;
     }
     const newStatus: UserStatus = target.status === 'active' ? 'inactive' : 'active';
-    const updated = { ...target, status: newStatus };
+    const hadExpiredSchedule = newStatus === 'active' && isAutoDeactivationDue(target);
+    const existingThreshold = getDeactivationThreshold(target);
+    const nextThreshold = hadExpiredSchedule ? null : existingThreshold;
+    const updated: UserProfile = {
+      ...target,
+      status: newStatus,
+      deactivationDate: nextThreshold,
+      autoDeactivateAt: nextThreshold,
+    };
     dataStore.saveUser(updated);
     setUsers(dataStore.getUsers());
-    toast.success(`User @${target.username} marked as ${newStatus}.`);
+    if (hadExpiredSchedule) {
+      toast.success(`User @${target.username} reactivated (expired auto-deactivation date cleared).`);
+    } else {
+      toast.success(`User @${target.username} marked as ${newStatus}.`);
+    }
   };
 
   const openAddModal = (defaultRole: UserRole = 'student') => {
@@ -168,11 +194,13 @@ export const AdminUsersPage: React.FC = () => {
     setFormSubjectIds(subjects.slice(0, 4).map((s) => s.id));
     setFormPassword('Eduform123!');
     setShowModalPassword(false);
+    setFormAutoDeactivateDate('');
+    setFormAutoDeactivateTime('00:00');
     setIsModalOpen(true);
   };
 
   const openEditModal = (u: UserProfile) => {
-    if (u.role === 'developer' || u.uid === 'dev-system-superuser' || u.usernameLower === 'developer') {
+    if (isDeveloperAccount(u)) {
       if (currentLoggedInUser?.role !== 'developer') {
         toast.error('The developer account is protected and cannot be edited by any other user.');
         return;
@@ -188,10 +216,25 @@ export const AdminUsersPage: React.FC = () => {
     setFormSubjectIds(u.subjectIds || []);
     setFormPassword(u.password || 'Eduform123!');
     setShowModalPassword(false);
+    const { date, time } = toDateInputAndTime(getDeactivationThreshold(u));
+    setFormAutoDeactivateDate(date);
+    setFormAutoDeactivateTime(time);
     setIsModalOpen(true);
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const applyDeactivationPreset = (daysFromNow: number) => {
+    const target = new Date();
+    target.setDate(target.getDate() + daysFromNow);
+    const year = target.getFullYear();
+    const month = String(target.getMonth() + 1).padStart(2, '0');
+    const day = String(target.getDate()).padStart(2, '0');
+    setFormAutoDeactivateDate(`${year}-${month}-${day}`);
+    if (!formAutoDeactivateTime) {
+      setFormAutoDeactivateTime('00:00');
+    }
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formFullName.trim()) {
       toast.error('Full name is required.');
@@ -231,59 +274,111 @@ export const AdminUsersPage: React.FC = () => {
 
     const now = new Date().toISOString();
     const finalPassword = formPassword.trim() || 'Eduform123!';
+    const isDevTarget = editingUser?.role === 'developer' || formRole === 'developer';
 
-    if (editingUser) {
-      const updated: UserProfile = {
-        ...editingUser,
-        fullName: formFullName.trim(),
-        username: formUsername.trim(),
-        usernameLower: cleanUsername,
-        authEmail: `${cleanUsername}@eduform.local`,
-        role: editingUser.role === 'developer' ? 'developer' : formRole,
-        status: editingUser.role === 'developer' ? 'active' : formStatus,
-        levelIds: formLevelIds,
-        classIds: formClassIds,
-        subjectIds: formSubjectIds,
-        password: finalPassword,
-      };
-      dataStore.saveUser(updated, currentLoggedInUser?.uid);
-      toast.success(`Account for ${updated.fullName} (@${updated.username}) updated.`);
-    } else {
-      const newUser: UserProfile = {
-        uid: `user-${Date.now()}`,
-        username: formUsername.trim(),
-        usernameLower: cleanUsername,
-        authEmail: `${cleanUsername}@eduform.local`,
-        fullName: formFullName.trim(),
-        role: formRole === 'developer' ? 'student' : formRole,
-        status: formStatus,
-        levelIds: formLevelIds,
-        classIds: formClassIds,
-        subjectIds: formSubjectIds,
-        password: finalPassword,
-        createdBy: currentLoggedInUser?.fullName || 'Dr. Evelyn Reed (Admin)',
-        createdAt: now,
-        lastLoginAt: null,
-      };
-      dataStore.saveUser(newUser, currentLoggedInUser?.uid);
-      toast.success(`Account created: @${newUser.username} (${newUser.fullName}).`);
+    let computedAutoDeactivateAt: string | null = isDevTarget
+      ? null
+      : combineDateAndTimeToIso(formAutoDeactivateDate, formAutoDeactivateTime || '00:00');
+
+    let effectiveStatus: UserStatus = isDevTarget ? 'active' : formStatus;
+    let clearedExpiredSchedule = false;
+
+    if (!isDevTarget && computedAutoDeactivateAt) {
+      const ts = parseDeactivationTimestamp(computedAutoDeactivateAt);
+      const isPastDue = ts !== null && ts <= Date.now();
+      const unchangedExpiredSchedule =
+        Boolean(editingUser) &&
+        editingUser?.status === 'inactive' &&
+        formStatus === 'active' &&
+        parseDeactivationTimestamp(getDeactivationThreshold(editingUser)) === ts;
+
+      if (unchangedExpiredSchedule) {
+        computedAutoDeactivateAt = null;
+        clearedExpiredSchedule = true;
+      } else if (isPastDue && effectiveStatus === 'active') {
+        effectiveStatus = 'inactive';
+      }
     }
 
-    setUsers(dataStore.getUsers());
-    setIsModalOpen(false);
+    try {
+      if (editingUser) {
+        const updated = await updateUserAsAdmin(
+          editingUser.uid,
+          {
+            fullName: formFullName.trim(),
+            username: formUsername.trim(),
+            role: editingUser.role === 'developer' ? 'developer' : formRole,
+            status: effectiveStatus,
+            deactivationDate: computedAutoDeactivateAt,
+            levelIds: formLevelIds,
+            classIds: formClassIds,
+            subjectIds: formSubjectIds,
+            password: finalPassword,
+          },
+          currentLoggedInUser?.uid || 'admin'
+        );
+        if (clearedExpiredSchedule) {
+          toast.success(`Account for @${updated.username} reactivated and expired auto-deactivation date cleared.`);
+        } else if (effectiveStatus === 'inactive' && formStatus === 'active' && computedAutoDeactivateAt) {
+          toast.info(`Account for @${updated.username} saved as deactivated because the scheduled date has already passed.`);
+        } else {
+          toast.success(`Account for ${updated.fullName} (@${updated.username}) updated.`);
+        }
+      } else {
+        const newUser: UserProfile = {
+          uid: `user-${Date.now()}`,
+          username: formUsername.trim(),
+          usernameLower: cleanUsername,
+          authEmail: `${cleanUsername}@eduform.local`,
+          fullName: formFullName.trim(),
+          role: formRole === 'developer' ? 'student' : formRole,
+          status: effectiveStatus,
+          deactivationDate: computedAutoDeactivateAt,
+          autoDeactivateAt: computedAutoDeactivateAt,
+          levelIds: formLevelIds,
+          classIds: formClassIds,
+          subjectIds: formSubjectIds,
+          password: finalPassword,
+          createdBy: currentLoggedInUser?.fullName || 'Dr. Evelyn Reed (Admin)',
+          createdAt: now,
+          lastLoginAt: null,
+        };
+        dataStore.saveUser(newUser, currentLoggedInUser?.uid);
+        if (effectiveStatus === 'inactive' && formStatus === 'active' && computedAutoDeactivateAt) {
+          toast.info(`Account @${newUser.username} created as deactivated because the scheduled date has already passed.`);
+        } else {
+          toast.success(`Account created: @${newUser.username} (${newUser.fullName}).`);
+        }
+      }
+
+      setUsers(dataStore.getUsers());
+      setIsModalOpen(false);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save user changes.');
+    }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!deleteTarget) return;
-    if (deleteTarget.role === 'developer' || deleteTarget.uid === 'dev-system-superuser' || deleteTarget.usernameLower === 'developer') {
-      toast.error('The developer superuser account is protected and cannot be removed.');
+    if (isDeveloperAccount(deleteTarget)) {
+      toast.error('The developer superuser account is protected and cannot be deleted.');
       setDeleteTarget(null);
       return;
     }
-    dataStore.deleteUser(deleteTarget.uid);
-    setUsers(dataStore.getUsers());
-    setDeleteTarget(null);
-    toast.success('User account removed successfully.');
+    if (deleteTarget.uid === currentLoggedInUser?.uid) {
+      toast.error('You cannot delete your own account while signed in.');
+      setDeleteTarget(null);
+      return;
+    }
+    try {
+      await deleteUserAsAdmin(deleteTarget.uid, currentLoggedInUser?.uid || 'admin');
+      setUsers(dataStore.getUsers());
+      setDeleteTarget(null);
+      toast.success(`User account @${deleteTarget.username} deleted successfully.`);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete user account.');
+      setDeleteTarget(null);
+    }
   };
 
   const toggleLevel = (lid: string) => {
@@ -565,29 +660,45 @@ export const AdminUsersPage: React.FC = () => {
 
                       {/* Status */}
                       <td className="py-3.5 px-4">
-                        <span
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            u.role === 'developer'
-                              ? 'bg-violet-100 text-violet-800 border border-violet-200'
-                              : u.status === 'active'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : 'bg-rose-100 text-rose-800'
-                          }`}
-                        >
-                          {u.role === 'developer' ? (
-                            <>
-                              <CheckCircle2 className="w-3 h-3 text-violet-600" /> Permanent Active
-                            </>
-                          ) : u.status === 'active' ? (
-                            <>
-                              <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Active
-                            </>
-                          ) : (
-                            <>
-                              <XCircle className="w-3 h-3 text-rose-600" /> Deactivated
-                            </>
+                        <div className="flex flex-col items-start gap-1">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              u.role === 'developer'
+                                ? 'bg-violet-100 text-violet-800 border border-violet-200'
+                                : u.status === 'active'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-rose-100 text-rose-800'
+                            }`}
+                          >
+                            {u.role === 'developer' ? (
+                              <>
+                                <CheckCircle2 className="w-3 h-3 text-violet-600" /> Permanent Active
+                              </>
+                            ) : u.status === 'active' ? (
+                              <>
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Active
+                              </>
+                            ) : (
+                              <>
+                                <XCircle className="w-3 h-3 text-rose-600" /> Deactivated
+                              </>
+                            )}
+                          </span>
+                          {u.role !== 'developer' && getDeactivationThreshold(u) && (
+                            <span
+                              className={`inline-flex items-center gap-1 text-[10px] font-medium ${
+                                u.status === 'active' ? 'text-amber-700' : 'text-slate-500'
+                              }`}
+                              title={`Scheduled auto-deactivation: ${formatAutoDeactivateDateTime(getDeactivationThreshold(u))}`}
+                            >
+                              <Calendar className="w-2.5 h-2.5 shrink-0" />
+                              <span>
+                                {u.status === 'active' ? 'Auto-off: ' : 'Expired: '}
+                                {formatAutoDeactivateDateTime(getDeactivationThreshold(u))}
+                              </span>
+                            </span>
                           )}
-                        </span>
+                        </div>
                       </td>
 
                       {/* Actions */}
@@ -641,19 +752,29 @@ export const AdminUsersPage: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => openEditModal(u)}
-                              className="p-1.5 rounded text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors cursor-pointer"
-                              title="Edit user assignments & password"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold text-slate-700 hover:text-[#0F2A4A] hover:bg-slate-100 border border-slate-200 transition-colors cursor-pointer"
+                              title="Edit user account, assignments, schedule, or password"
                             >
                               <Pencil className="w-3.5 h-3.5" />
+                              <span>Edit</span>
                             </button>
                             <button
                               type="button"
+                              disabled={u.uid === currentLoggedInUser?.uid}
                               onClick={() => setDeleteTarget(u)}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200 transition-colors cursor-pointer"
-                              title="Remove user account"
+                              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold border transition-colors ${
+                                u.uid === currentLoggedInUser?.uid
+                                  ? 'text-slate-400 border-slate-200 bg-slate-50 cursor-not-allowed'
+                                  : 'text-rose-600 hover:text-rose-700 hover:bg-rose-50 border-rose-200 cursor-pointer'
+                              }`}
+                              title={
+                                u.uid === currentLoggedInUser?.uid
+                                  ? 'You cannot delete your currently signed-in account'
+                                  : 'Delete user account'
+                              }
                             >
-                              <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                              <span>Remove</span>
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Delete</span>
                             </button>
                           </div>
                         )}
@@ -758,6 +879,115 @@ export const AdminUsersPage: React.FC = () => {
                     </select>
                   </div>
                 </div>
+
+                {/* Automatic Deactivation Schedule (Non-Developer Accounts) */}
+                {formRole !== 'developer' && editingUser?.role !== 'developer' && (
+                  <div className="p-3.5 bg-amber-50/60 rounded-xl border border-amber-200/80 space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label className="text-xs font-bold uppercase text-[#0F2A4A] flex items-center gap-1.5">
+                        <Calendar className="w-3.5 h-3.5 text-amber-600" />
+                        Auto-Deactivation Date (Optional)
+                      </label>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => applyDeactivationPreset(7)}
+                          className="px-2 py-0.5 rounded text-[11px] font-semibold bg-white border border-amber-200 text-amber-800 hover:bg-amber-100/70 transition-colors cursor-pointer"
+                        >
+                          +7d
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => applyDeactivationPreset(30)}
+                          className="px-2 py-0.5 rounded text-[11px] font-semibold bg-white border border-amber-200 text-amber-800 hover:bg-amber-100/70 transition-colors cursor-pointer"
+                        >
+                          +30d
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => applyDeactivationPreset(90)}
+                          className="px-2 py-0.5 rounded text-[11px] font-semibold bg-white border border-amber-200 text-amber-800 hover:bg-amber-100/70 transition-colors cursor-pointer"
+                        >
+                          +90d
+                        </button>
+                        {formAutoDeactivateDate && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormAutoDeactivateDate('');
+                              setFormAutoDeactivateTime('00:00');
+                            }}
+                            className="px-2 py-0.5 rounded text-[11px] font-semibold text-rose-600 hover:bg-rose-50 border border-rose-200 bg-white transition-colors cursor-pointer"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div>
+                        <span className="block text-[11px] font-medium text-slate-600 mb-1">
+                          Deactivation Date
+                        </span>
+                        <input
+                          type="date"
+                          value={formAutoDeactivateDate}
+                          onChange={(e) => setFormAutoDeactivateDate(e.target.value)}
+                          className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-lg bg-white focus:outline-hidden focus:border-[#0F2A4A]"
+                        />
+                      </div>
+                      <div>
+                        <span className="block text-[11px] font-medium text-slate-600 mb-1 flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-slate-400" /> Time (Local)
+                        </span>
+                        <input
+                          type="time"
+                          value={formAutoDeactivateTime}
+                          disabled={!formAutoDeactivateDate}
+                          onChange={(e) => setFormAutoDeactivateTime(e.target.value || '00:00')}
+                          className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-lg bg-white disabled:bg-slate-100 disabled:text-slate-400 focus:outline-hidden focus:border-[#0F2A4A]"
+                        />
+                      </div>
+                    </div>
+
+                    {(() => {
+                      const previewIso = combineDateAndTimeToIso(
+                        formAutoDeactivateDate,
+                        formAutoDeactivateTime || '00:00'
+                      );
+                      if (!previewIso) {
+                        return (
+                          <p className="text-[11px] text-slate-500">
+                            Leave blank to keep the account active indefinitely until manually deactivated.
+                          </p>
+                        );
+                      }
+                      const ts = parseDeactivationTimestamp(previewIso);
+                      const isPast = ts !== null && ts <= Date.now();
+                      const formatted = formatAutoDeactivateDateTime(previewIso);
+                      if (isPast && editingUser?.status === 'inactive' && formStatus === 'active' && parseDeactivationTimestamp(getDeactivationThreshold(editingUser)) === ts) {
+                        return (
+                          <p className="text-[11px] text-emerald-700 font-medium">
+                            Previous deactivation date ({formatted}) has passed — saving with Active status will clear it automatically.
+                          </p>
+                        );
+                      }
+                      if (isPast) {
+                        return (
+                          <p className="text-[11px] text-rose-700 font-medium">
+                            Selected date/time ({formatted}) has already passed — saving will deactivate this account immediately.
+                          </p>
+                        );
+                      }
+                      return (
+                        <p className="text-[11px] text-amber-800 font-medium">
+                          Account access will automatically lock on <strong>{formatted}</strong> (12:00 AM if no time chosen).
+                        </p>
+                      );
+                    })()}
+                  </div>
+                )}
 
                 {/* Password Setting & Verification */}
                 <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
@@ -919,7 +1149,9 @@ export const AdminUsersPage: React.FC = () => {
 
               {/* Fixed Modal Footer */}
               <div className="flex items-center justify-between p-4 sm:p-5 border-t border-slate-100 bg-slate-50/80 shrink-0">
-                {editingUser ? (
+                {editingUser &&
+                !isDeveloperAccount(editingUser) &&
+                editingUser.uid !== currentLoggedInUser?.uid ? (
                   <button
                     type="button"
                     onClick={() => {
@@ -928,7 +1160,7 @@ export const AdminUsersPage: React.FC = () => {
                     }}
                     className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200 transition-colors cursor-pointer"
                   >
-                    <Trash2 className="w-3.5 h-3.5" /> Remove Account
+                    <Trash2 className="w-3.5 h-3.5" /> Delete Account
                   </button>
                 ) : (
                   <div />
@@ -962,9 +1194,9 @@ export const AdminUsersPage: React.FC = () => {
             <div className="w-10 h-10 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mb-4">
               <AlertTriangle className="w-5 h-5" />
             </div>
-            <h3 className="text-lg font-bold text-[#0F2A4A]">Remove Account?</h3>
+            <h3 className="text-lg font-bold text-[#0F2A4A]">Delete User Account?</h3>
             <p className="mt-2 text-xs text-slate-600 leading-relaxed">
-              Are you sure you want to remove account <strong>@{deleteTarget.username}</strong> ({deleteTarget.fullName})? All access credentials and cohort enrollments will be revoked.
+              Are you sure you want to permanently delete account <strong>@{deleteTarget.username}</strong> ({deleteTarget.fullName})? All access credentials and cohort enrollments will be revoked.
             </p>
             <div className="mt-6 flex justify-end gap-2">
               <button
@@ -979,7 +1211,7 @@ export const AdminUsersPage: React.FC = () => {
                 onClick={handleDelete}
                 className="px-4 py-2 rounded-lg text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white cursor-pointer"
               >
-                Yes, Remove Account
+                Yes, Delete Account
               </button>
             </div>
           </div>

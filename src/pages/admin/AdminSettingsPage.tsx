@@ -55,7 +55,7 @@ import { SYSTEM_THEMES, getTheme } from '@/src/lib/themes';
 import { toast } from 'sonner';
 
 export const AdminSettingsPage: React.FC = () => {
-  const { profile } = useAuth();
+  const { profile, isDeveloper } = useAuth();
   const { mode, isNight, setMode } = useColorMode();
   const [settings, setSettings] = useState<SystemSettings>(() => dataStore.getSettings());
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => dataStore.getAuditLogs());
@@ -1463,14 +1463,21 @@ export const AdminSettingsPage: React.FC = () => {
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => setIsDeveloperPasswordModalOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer shrink-0"
-                >
-                  <KeyRound className="w-3.5 h-3.5 text-violet-200" />
-                  Change Developer Password
-                </button>
+                {isDeveloper ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsDeveloperPasswordModalOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer shrink-0"
+                  >
+                    <KeyRound className="w-3.5 h-3.5 text-violet-200" />
+                    Change Developer Password
+                  </button>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800/80 border border-violet-500/30 text-violet-200 text-xs font-semibold shrink-0">
+                    <Lock className="w-3.5 h-3.5 text-violet-400" />
+                    Developer Session Only
+                  </span>
+                )}
               </div>
 
               <div className="text-xs text-slate-300 bg-slate-950/40 rounded-lg p-3 border border-violet-900/30 space-y-1.5">

@@ -46,9 +46,18 @@ export const LoginPage: React.FC = () => {
   const { signIn, profile, switchDemoUser, isPlaceholderMode } = useAuth();
   const { isNight, toggleMode } = useColorMode();
   const [showPassword, setShowPassword] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<string | null>(
+    () => (location.state as { error?: string } | null)?.error || null
+  );
   const [showResetModal, setShowResetModal] = useState(false);
   const [settings, setSettings] = useState<SystemSettings>(() => dataStore.getSettings());
+
+  useEffect(() => {
+    const stateError = (location.state as { error?: string } | null)?.error;
+    if (stateError) {
+      setAuthError(stateError);
+    }
+  }, [location.state]);
 
   useEffect(() => {
     const handleUpdate = (e: Event) => {

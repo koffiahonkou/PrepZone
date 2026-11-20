@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { AuthProvider } from './context/AuthContext';
@@ -25,8 +25,14 @@ import { StudentNotificationsPage } from './pages/student/StudentNotificationsPa
 import { StudentAskTeacherPage } from './pages/student/StudentAskTeacherPage';
 import { TeacherInquiriesPage } from './pages/teacher/TeacherInquiriesPage';
 import { StagePlaceholderPage } from './pages/common/StagePlaceholderPage';
+import { startScheduledDeactivationJob } from './services/userAdminService';
 
 export default function App() {
+  useEffect(() => {
+    const stopJob = startScheduledDeactivationJob(60_000);
+    return () => stopJob();
+  }, []);
+
   return (
     <ColorModeProvider>
         <AuthProvider>

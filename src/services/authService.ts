@@ -7,6 +7,11 @@ import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { auth, db, AUTH_DOMAIN, handleFirestoreError, OperationType } from '@/src/lib/firebase';
 import { UserProfile } from '@/src/types';
 import { AppError } from '@/src/lib/errors';
+import {
+  getDeactivationThreshold,
+  getScheduledDeactivationNotice,
+} from '@/src/utils/accountLifecycle';
+import { checkAndEnforceUserDeactivationOnLogin } from '@/src/services/userAdminService';
 
 export async function loginWithUsername(usernameRaw: string, passwordRaw: string): Promise<{
   user: FirebaseUser;
@@ -33,10 +38,11 @@ export async function loginWithUsername(usernameRaw: string, passwordRaw: string
       );
     }
 
-    if (profile.status === 'inactive') {
+    const { deactivated, profile: enforcedProfile } = await checkAndEnforceUserDeactivationOnLogin(profile);
+    if (deactivated) {
       await fbSignOut(auth);
       throw new AppError(
-        'Your account has been deactivated. Please contact your school administrator.',
+        getScheduledDeactivationNotice(getDeactivationThreshold(enforcedProfile)),
         'auth/account-inactive'
       );
     }
@@ -44,7 +50,7 @@ export async function loginWithUsername(usernameRaw: string, passwordRaw: string
     // Update lastLoginAt
     await updateLastLogin(user.uid);
 
-    return { user, profile };
+    return { user, profile: enforcedProfile };
   } catch (error: unknown) {
     if (error instanceof AppError) {
       throw error;
