@@ -18,6 +18,7 @@ import { AdminSubmissionsPage } from './pages/admin/AdminSubmissionsPage';
 import { AdminGradebookPage } from './pages/admin/AdminGradebookPage';
 import { AdminNotificationsPage } from './pages/admin/AdminNotificationsPage';
 import { AdminSettingsPage } from './pages/admin/AdminSettingsPage';
+import { AdminActivityLogsPage } from './pages/admin/AdminActivityLogsPage';
 import { StudentLessonsPage } from './pages/student/StudentLessonsPage';
 import { StudentQuizzesPage } from './pages/student/StudentQuizzesPage';
 import { StudentResultsPage } from './pages/student/StudentResultsPage';
@@ -125,6 +126,7 @@ export default function App() {
                 <Route path="/admin/users" element={<AdminUsersPage />} />
                 <Route path="/admin/classes" element={<AdminClassesPage />} />
                 <Route path="/admin/subjects" element={<AdminSubjectsPage />} />
+                <Route path="/admin/activity-logs" element={<AdminActivityLogsPage />} />
                 <Route path="/admin/settings" element={<AdminSettingsPage />} />
               </Route>
             </Route>

@@ -29,6 +29,7 @@ import {
   GraduationCap,
 } from 'lucide-react';
 import { dataStore } from '@/src/services/dataStore';
+import { useAuth } from '@/src/context/AuthContext';
 import { Quiz, QuizQuestion, QuestionType, QuestionOption, Subject, AcademicClass, Submission } from '@/src/types';
 import { RichTextEditor } from '@/src/components/common/RichTextEditor';
 import { validateQuiz, QuizValidationResult, QuizValidationError } from '@/src/services/quizValidator';
@@ -135,6 +136,7 @@ export const getQuestionSectionKey = (q: QuizQuestion): SectionKey => {
 };
 
 export const AdminQuizzesPage: React.FC = () => {
+  const { profile } = useAuth();
   const [quizzes, setQuizzes] = useState<Quiz[]>(() => dataStore.getQuizzes());
   const [subjects, setSubjects] = useState<Subject[]>(() => dataStore.getSubjects());
   const [classes, setClasses] = useState<AcademicClass[]>(() => dataStore.getClasses());
@@ -398,7 +400,7 @@ export const AdminQuizzesPage: React.FC = () => {
       status: 'draft',
       createdAt: new Date().toISOString(),
     };
-    dataStore.saveQuiz(duplicated);
+    dataStore.saveQuiz(duplicated, profile?.uid, 'QUIZ_DUPLICATED');
     setQuizzes(dataStore.getQuizzes());
     toast.success(`Quiz duplicated as "${duplicated.title}".`);
   };
@@ -427,7 +429,7 @@ export const AdminQuizzesPage: React.FC = () => {
       },
     };
 
-    dataStore.saveQuiz(updated);
+    dataStore.saveQuiz(updated, profile?.uid, 'QUIZ_STATUS_CHANGED');
     setQuizzes(dataStore.getQuizzes());
     toast.success(
       isCurrentlyClosed
@@ -507,7 +509,7 @@ export const AdminQuizzesPage: React.FC = () => {
         questions: formQuestions,
         totalMarks,
       };
-      dataStore.saveQuiz(updated);
+      dataStore.saveQuiz(updated, profile?.uid, 'QUIZ_UPDATED');
       toast.success(`Quiz "${updated.title}" validated and updated successfully (${totalMarks} marks).`);
     } else {
       const newQuiz: Quiz = {
@@ -539,10 +541,10 @@ export const AdminQuizzesPage: React.FC = () => {
         },
         questions: formQuestions,
         totalMarks,
-        createdBy: 'Dr. Evelyn Reed (Admin)',
+        createdBy: profile?.fullName || 'Dr. Evelyn Reed (Admin)',
         createdAt: new Date().toISOString(),
       };
-      dataStore.saveQuiz(newQuiz);
+      dataStore.saveQuiz(newQuiz, profile?.uid, 'QUIZ_CREATED');
       toast.success(`Quiz "${newQuiz.title}" validated and created with ${formQuestions.length} questions (${totalMarks} marks).`);
     }
 
@@ -552,7 +554,7 @@ export const AdminQuizzesPage: React.FC = () => {
 
   const handleDelete = () => {
     if (!deleteTarget) return;
-    dataStore.deleteQuiz(deleteTarget.id);
+    dataStore.deleteQuiz(deleteTarget.id, profile?.uid);
     setQuizzes(dataStore.getQuizzes());
     setDeleteTarget(null);
     toast.success('Quiz assessment deleted.');
@@ -2236,7 +2238,7 @@ export const AdminQuizzesPage: React.FC = () => {
           isOpen={Boolean(reactivationModalQuiz)}
           onClose={() => setReactivationModalQuiz(null)}
           onUpdateQuiz={(updatedQuiz) => {
-            dataStore.saveQuiz(updatedQuiz);
+            dataStore.saveQuiz(updatedQuiz, profile?.uid, 'QUIZ_REACTIVATED');
             setQuizzes(dataStore.getQuizzes());
             setReactivationModalQuiz(null);
           }}

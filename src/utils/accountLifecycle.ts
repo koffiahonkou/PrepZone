@@ -34,6 +34,13 @@ export function parseDeactivationTimestamp(value?: string | null): number | null
   return isNaN(parsed.getTime()) ? null : parsed.getTime();
 }
 
+export function getReactivationThreshold(
+  user?: Pick<UserProfile, 'reactivationDate'> | null
+): string | null {
+  if (!user) return null;
+  return user.reactivationDate ?? null;
+}
+
 export function getDeactivationThreshold(
   user?: Pick<UserProfile, 'deactivationDate' | 'autoDeactivateAt'> | null
 ): string | null {
@@ -50,6 +57,135 @@ export function isAutoDeactivationDue(
   const ts = parseDeactivationTimestamp(threshold);
   if (ts === null) return false;
   return nowMs >= ts;
+}
+
+export function isAutoReactivationDue(
+  user?: Pick<
+    UserProfile,
+    'uid' | 'usernameLower' | 'role' | 'status' | 'reactivationDate' | 'deactivationDate' | 'autoDeactivateAt'
+  > | null,
+  nowMs: number = Date.now()
+): boolean {
+  if (!user || isDeveloperAccount(user)) return false;
+  if (user.status === 'active') return false;
+  const reactTs = parseDeactivationTimestamp(getReactivationThreshold(user));
+  if (reactTs === null || nowMs < reactTs) return false;
+
+  const deactTs = parseDeactivationTimestamp(getDeactivationThreshold(user));
+  if (deactTs !== null && deactTs > reactTs && nowMs >= deactTs) {
+    return false;
+  }
+  return true;
+}
+
+export interface LifecycleEvaluationResult {
+  changed: boolean;
+  nextStatus: 'active' | 'inactive';
+  nextReactivationDate: string | null;
+  nextDeactivationDate: string | null;
+  event: 'activated' | 'deactivated' | null;
+}
+
+/**
+ * Resolves chronological reactivationDate + deactivationDate transitions cleanly without
+ * causing infinite toggle loops after a reactivation timestamp is consumed.
+ */
+export function evaluateAccountLifecycle(
+  user: Pick<
+    UserProfile,
+    'uid' | 'usernameLower' | 'role' | 'status' | 'reactivationDate' | 'deactivationDate' | 'autoDeactivateAt'
+  >,
+  nowMs: number = Date.now()
+): LifecycleEvaluationResult {
+  if (isDeveloperAccount(user)) {
+    const changed =
+      user.status !== 'active' ||
+      Boolean(user.reactivationDate) ||
+      Boolean(user.deactivationDate) ||
+      Boolean(user.autoDeactivateAt);
+    return {
+      changed,
+      nextStatus: 'active',
+      nextReactivationDate: null,
+      nextDeactivationDate: null,
+      event: null,
+    };
+  }
+
+  const rawReact = getReactivationThreshold(user);
+  const rawDeact = getDeactivationThreshold(user);
+  const reactTs = parseDeactivationTimestamp(rawReact);
+  const deactTs = parseDeactivationTimestamp(rawDeact);
+
+  let nextStatus: 'active' | 'inactive' = user.status;
+  let nextReact = rawReact;
+  let nextDeact = rawDeact;
+  let event: 'activated' | 'deactivated' | null = null;
+
+  if (user.status === 'inactive') {
+    if (reactTs !== null && nowMs >= reactTs) {
+      if (deactTs !== null && deactTs > reactTs && nowMs >= deactTs) {
+        // Reactivation window opened and subsequent deactivation already passed
+        nextStatus = 'inactive';
+        nextReact = null;
+        event = null;
+      } else {
+        // Account is due for automatic reactivation
+        nextStatus = 'active';
+        nextReact = null;
+        if (deactTs !== null && deactTs <= reactTs) {
+          nextDeact = null;
+        }
+        event = 'activated';
+      }
+    }
+  } else {
+    // Currently active: check if deactivation threshold has arrived
+    if (deactTs !== null && nowMs >= deactTs) {
+      if (reactTs !== null && reactTs > deactTs && nowMs >= reactTs) {
+        // Scheduled reactivation came after the old deactivation threshold
+        nextStatus = 'active';
+        nextReact = null;
+        nextDeact = null;
+      } else {
+        nextStatus = 'inactive';
+        nextDeact = rawDeact;
+        if (reactTs !== null && reactTs <= deactTs) {
+          nextReact = null;
+        }
+        event = 'deactivated';
+      }
+    }
+  }
+
+  const changed =
+    nextStatus !== user.status ||
+    nextReact !== (user.reactivationDate ?? null) ||
+    nextDeact !== (user.deactivationDate ?? null) ||
+    nextDeact !== (user.autoDeactivateAt ?? null);
+
+  return {
+    changed,
+    nextStatus,
+    nextReactivationDate: nextReact,
+    nextDeactivationDate: nextDeact,
+    event,
+  };
+}
+
+export function isOldOrDormantAccount(
+  user?: Pick<UserProfile, 'uid' | 'usernameLower' | 'role' | 'status' | 'lastLoginAt' | 'createdAt'> | null,
+  dormantDays: number = 30,
+  nowMs: number = Date.now()
+): boolean {
+  if (!user || isDeveloperAccount(user)) return false;
+  if (user.status === 'inactive') return true;
+  const referenceIso = user.lastLoginAt || user.createdAt;
+  if (!referenceIso) return true;
+  const refTs = new Date(referenceIso).getTime();
+  if (Number.isNaN(refTs)) return false;
+  const diffDays = (nowMs - refTs) / (1000 * 60 * 60 * 24);
+  return diffDays >= dormantDays;
 }
 
 export function formatAutoDeactivateDateTime(value?: string | null): string | null {
@@ -75,6 +211,8 @@ export function formatAutoDeactivateDateTime(value?: string | null): string | nu
     year: 'numeric',
   });
 }
+
+export const formatLifecycleDateTime = formatAutoDeactivateDateTime;
 
 export function toDateInputAndTime(value?: string | null): { date: string; time: string } {
   const ts = parseDeactivationTimestamp(value);
@@ -112,10 +250,22 @@ export function combineDateAndTimeToIso(dateStr: string, timeStr: string = '00:0
   return localDate.toISOString();
 }
 
-export function getScheduledDeactivationNotice(autoDeactivateAt?: string | null): string {
-  const formatted = formatAutoDeactivateDateTime(autoDeactivateAt);
-  if (formatted && isAutoDeactivationDue({ role: 'student', uid: '', usernameLower: '', autoDeactivateAt })) {
-    return `This account was automatically deactivated on ${formatted}. Please contact your school administrator to restore access.`;
+export function getScheduledDeactivationNotice(
+  autoDeactivateAt?: string | null,
+  reactivationDate?: string | null
+): string {
+  const formattedDeact = formatAutoDeactivateDateTime(autoDeactivateAt);
+  const formattedReact = formatAutoDeactivateDateTime(reactivationDate);
+  const reactTs = parseDeactivationTimestamp(reactivationDate);
+  const hasFutureReactivation = formattedReact && reactTs !== null && reactTs > Date.now();
+
+  if (formattedDeact && isAutoDeactivationDue({ role: 'student', uid: '', usernameLower: '', autoDeactivateAt })) {
+    return hasFutureReactivation
+      ? `This account was automatically deactivated on ${formattedDeact} and is scheduled to reactivate on ${formattedReact}.`
+      : `This account was automatically deactivated on ${formattedDeact}. Please contact your school administrator to restore access.`;
+  }
+  if (hasFutureReactivation) {
+    return `Your account is currently deactivated and scheduled to automatically reactivate on ${formattedReact}.`;
   }
   return 'Your account has been deactivated. Please contact your school administrator.';
 }

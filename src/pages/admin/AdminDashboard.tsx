@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   RefreshCw,
   Video,
+  History,
 } from 'lucide-react';
 import { useAuth } from '@/src/context/AuthContext';
 import { dataStore } from '@/src/services/dataStore';
@@ -121,6 +122,12 @@ export const AdminDashboard: React.FC = () => {
             className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold shadow-xs transition-colors"
           >
             <Video className="w-4 h-4" /> Video Notes & Lessons
+          </Link>
+          <Link
+            to="/admin/activity-logs"
+            className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-lg bg-white/15 hover:bg-white/25 text-white text-xs font-semibold backdrop-blur-xs transition-colors"
+          >
+            <History className="w-4 h-4" /> Activity Logs
           </Link>
           <Link
             to="/admin/users"

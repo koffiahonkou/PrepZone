@@ -46,6 +46,8 @@ import {
   isDeveloperAccount,
   isAutoDeactivationDue,
   getDeactivationThreshold,
+  getReactivationThreshold,
+  evaluateAccountLifecycle,
 } from '@/src/utils/accountLifecycle';
 
 const STORAGE_KEYS = {
@@ -315,6 +317,39 @@ class DataStore {
         (err) => console.warn('Notifications onSnapshot error:', err)
       );
 
+      // 12. Audit Logs Real-time Sync
+      onSnapshot(
+        collection(db, 'auditLogs'),
+        (snap) => {
+          if (!snap.empty) {
+            const localLogs = getStoredOrInit<AuditLog[]>(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
+            const mergedMap = new Map<string, AuditLog>();
+            localLogs.forEach((l) => {
+              if (l?.id) mergedMap.set(l.id, l);
+            });
+            snap.forEach((d) => {
+              const data = d.data() as Partial<AuditLog>;
+              const id = data.id || d.id;
+              mergedMap.set(id, {
+                id,
+                actorId: data.actorId || 'system',
+                action: data.action || 'SYSTEM_EVENT',
+                targetType: data.targetType || 'system',
+                targetId: data.targetId || '',
+                meta: (data.meta as Record<string, unknown>) || {},
+                timestamp: data.timestamp || new Date().toISOString(),
+              });
+            });
+            const merged = Array.from(mergedMap.values()).sort(
+              (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+            );
+            saveStore(STORAGE_KEYS.AUDIT_LOGS, merged);
+            window.dispatchEvent(new CustomEvent('eduform_audit_logs_updated'));
+          }
+        },
+        (err) => console.warn('AuditLogs onSnapshot error:', err)
+      );
+
       // Perform a background one-time full hydration pull to ensure immediate parity with Cloud/Vercel
       setTimeout(() => {
         this.pullAllRemoteDataFromFirestore().catch((err) =>
@@ -354,6 +389,7 @@ class DataStore {
       inquiries: 0,
       cannedResponses: 0,
       notifications: 0,
+      auditLogs: 0,
     };
     let totalDocs = 0;
 
@@ -425,6 +461,42 @@ class DataStore {
         pullColl<StudentInquiry>('inquiries', STORAGE_KEYS.INQUIRIES, 'eduform_inquiries_updated'),
         pullColl<CannedResponse>('cannedResponses', STORAGE_KEYS.CANNED_RESPONSES, 'eduform_canned_responses_updated'),
         pullColl<AppNotification>('notifications', STORAGE_KEYS.NOTIFICATIONS, 'eduform_notifications_updated'),
+        (async () => {
+          try {
+            const snap = await getDocs(collection(db, 'auditLogs'));
+            if (!snap.empty) {
+              const localLogs = getStoredOrInit<AuditLog[]>(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
+              const mergedMap = new Map<string, AuditLog>();
+              localLogs.forEach((l) => {
+                if (l?.id) mergedMap.set(l.id, l);
+              });
+              snap.forEach((d) => {
+                const data = d.data() as Partial<AuditLog>;
+                const id = data.id || d.id;
+                mergedMap.set(id, {
+                  id,
+                  actorId: data.actorId || 'system',
+                  action: data.action || 'SYSTEM_EVENT',
+                  targetType: data.targetType || 'system',
+                  targetId: data.targetId || '',
+                  meta: (data.meta as Record<string, unknown>) || {},
+                  timestamp: data.timestamp || new Date().toISOString(),
+                });
+              });
+              const merged = Array.from(mergedMap.values()).sort(
+                (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+              );
+              saveStore(STORAGE_KEYS.AUDIT_LOGS, merged);
+              details.auditLogs = snap.size;
+              totalDocs += snap.size;
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('eduform_audit_logs_updated'));
+              }
+            }
+          } catch (e) {
+            console.warn('Pull collection auditLogs error:', e);
+          }
+        })(),
       ]);
 
       return { success: true, count: totalDocs, details };
@@ -459,6 +531,7 @@ class DataStore {
       inquiries: this.getInquiries().length,
       cannedResponses: this.getCannedResponses().length,
       notifications: this.getNotifications().length,
+      auditLogs: this.getAuditLogs().length,
     };
 
     const cloudCounts: Record<string, number> = {
@@ -473,6 +546,7 @@ class DataStore {
       inquiries: 0,
       cannedResponses: 0,
       notifications: 0,
+      auditLogs: 0,
     };
 
     try {
@@ -491,6 +565,7 @@ class DataStore {
         'inquiries',
         'cannedResponses',
         'notifications',
+        'auditLogs',
       ];
 
       await Promise.all(
@@ -732,6 +807,24 @@ class DataStore {
       } catch (e: any) {
         console.warn(`Sync submission ${sub.id} warning:`, e);
       }
+    }
+
+    // 12. Audit Logs (immutable in Firestore rules: only create missing log documents)
+    try {
+      const existingSnap = await getDocs(collection(db, 'auditLogs'));
+      const existingIds = new Set<string>();
+      existingSnap.forEach((d) => existingIds.add(d.id));
+      for (const log of this.getAuditLogs()) {
+        if (!log.id || existingIds.has(log.id)) continue;
+        try {
+          await setDoc(doc(db, 'auditLogs', log.id), sanitizeForFirestore(log));
+          count++;
+        } catch (e: any) {
+          console.warn(`Sync audit log ${log.id} warning:`, e);
+        }
+      }
+    } catch (e: any) {
+      console.warn('Sync auditLogs warning:', e);
     }
 
     if (count === 0 && errors.length > 0) {
@@ -1005,14 +1098,17 @@ class DataStore {
                 ...u,
                 role: 'developer' as const,
                 status: 'active' as const,
+                reactivationDate: null,
                 deactivationDate: null,
                 autoDeactivateAt: null,
                 password: u.password || currentDev.password || 'Eduform123!',
               };
             }
             const threshold = getDeactivationThreshold(u);
+            const reactivationDate = getReactivationThreshold(u);
             return {
               ...u,
+              reactivationDate,
               deactivationDate: threshold,
               autoDeactivateAt: threshold,
             };
@@ -1058,7 +1154,8 @@ class DataStore {
   public getUsers(): UserProfile[] {
     const rawUsers = getStoredOrInit<UserProfile[]>(STORAGE_KEYS.USERS, INITIAL_USERS);
     let changed = false;
-    const autoDeactivatedUsers: UserProfile[] = [];
+    const autoDeactivatedUsers: Array<{ user: UserProfile; triggerThreshold: string | null }> = [];
+    const autoReactivatedUsers: Array<{ user: UserProfile; triggerThreshold: string | null }> = [];
     const nowMs = Date.now();
 
     // Guarantee that the developer superuser account is always present and protected
@@ -1072,26 +1169,20 @@ class DataStore {
 
     const migrated = rawUsers.map((u) => {
       let userChanged = false;
-      let nextStatus = u.status;
       let nextRole = u.role;
-      let nextDeactivationDate = getDeactivationThreshold(u);
 
-      // Lock developer superuser properties (never allow deactivation)
+      const lifecycle = evaluateAccountLifecycle(u, nowMs);
+      const nextStatus = lifecycle.nextStatus;
+      const nextReactivationDate = lifecycle.nextReactivationDate;
+      const nextDeactivationDate = lifecycle.nextDeactivationDate;
+
       if (isDeveloperAccount(u)) {
-        if (nextRole !== 'developer' || nextStatus !== 'active' || nextDeactivationDate || u.deactivationDate || u.autoDeactivateAt) {
+        if (nextRole !== 'developer' || lifecycle.changed) {
           nextRole = 'developer';
-          nextStatus = 'active';
-          nextDeactivationDate = null;
           userChanged = true;
         }
-      } else {
-        if (u.deactivationDate !== nextDeactivationDate || u.autoDeactivateAt !== nextDeactivationDate) {
-          userChanged = true;
-        }
-        if (nextStatus === 'active' && isAutoDeactivationDue(u, nowMs)) {
-          nextStatus = 'inactive';
-          userChanged = true;
-        }
+      } else if (lifecycle.changed) {
+        userChanged = true;
       }
 
       let newLevelIds = u.levelIds || [];
@@ -1130,14 +1221,23 @@ class DataStore {
           ...u,
           role: nextRole,
           status: nextStatus,
+          reactivationDate: nextReactivationDate,
           deactivationDate: nextDeactivationDate,
           autoDeactivateAt: nextDeactivationDate,
           levelIds: newLevelIds,
           password,
           subjectIds,
         };
-        if (u.status === 'active' && nextStatus === 'inactive' && isAutoDeactivationDue(u, nowMs)) {
-          autoDeactivatedUsers.push(updatedUser);
+        if (lifecycle.event === 'deactivated') {
+          autoDeactivatedUsers.push({
+            user: updatedUser,
+            triggerThreshold: getDeactivationThreshold(u),
+          });
+        } else if (lifecycle.event === 'activated') {
+          autoReactivatedUsers.push({
+            user: updatedUser,
+            triggerThreshold: getReactivationThreshold(u),
+          });
         }
         return updatedUser;
       }
@@ -1147,8 +1247,8 @@ class DataStore {
     if (changed) {
       saveStore(STORAGE_KEYS.USERS, migrated);
 
-      if (autoDeactivatedUsers.length > 0) {
-        autoDeactivatedUsers.forEach((deactivated) => {
+      if (autoDeactivatedUsers.length > 0 || autoReactivatedUsers.length > 0) {
+        autoDeactivatedUsers.forEach(({ user: deactivated, triggerThreshold }) => {
           this.addAuditLog({
             actorId: 'system',
             action: 'USER_AUTO_DEACTIVATED',
@@ -1156,13 +1256,39 @@ class DataStore {
             targetId: deactivated.uid,
             meta: {
               username: deactivated.username,
-              deactivationDate: deactivated.deactivationDate,
+              fullName: deactivated.fullName,
+              deactivationDate: triggerThreshold || deactivated.deactivationDate,
+              trigger: 'scheduled_job',
             },
           });
           try {
             const payload = enforceFirestoreSizeLimit(deactivated);
             setDoc(doc(db, 'users', deactivated.uid), payload, { merge: true }).catch((err) =>
               console.warn('Async auto-deactivation sync to Firestore deferred:', err)
+            );
+          } catch {
+            // offline fallback
+          }
+        });
+
+        autoReactivatedUsers.forEach(({ user: reactivated, triggerThreshold }) => {
+          this.addAuditLog({
+            actorId: 'system',
+            action: 'USER_AUTO_REACTIVATED',
+            targetType: 'user',
+            targetId: reactivated.uid,
+            meta: {
+              username: reactivated.username,
+              fullName: reactivated.fullName,
+              reactivationDate: triggerThreshold,
+              deactivationDate: reactivated.deactivationDate,
+              trigger: 'scheduled_job',
+            },
+          });
+          try {
+            const payload = enforceFirestoreSizeLimit(reactivated);
+            setDoc(doc(db, 'users', reactivated.uid), payload, { merge: true }).catch((err) =>
+              console.warn('Async auto-reactivation sync to Firestore deferred:', err)
             );
           } catch {
             // offline fallback
@@ -1179,6 +1305,10 @@ class DataStore {
       return migrated;
     }
     return rawUsers;
+  }
+
+  public enforceAccountLifecycle(): UserProfile[] {
+    return this.getUsers();
   }
 
   public enforceScheduledDeactivations(): UserProfile[] {
@@ -1331,12 +1461,15 @@ class DataStore {
       user.status = 'active';
       user.username = 'developer';
       user.usernameLower = 'developer';
+      user.reactivationDate = null;
       user.deactivationDate = null;
       user.autoDeactivateAt = null;
     } else {
-      const normalizedThreshold = getDeactivationThreshold(user);
-      user.deactivationDate = normalizedThreshold;
-      user.autoDeactivateAt = normalizedThreshold;
+      const lifecycle = evaluateAccountLifecycle(user);
+      user.status = lifecycle.nextStatus;
+      user.reactivationDate = lifecycle.nextReactivationDate;
+      user.deactivationDate = lifecycle.nextDeactivationDate;
+      user.autoDeactivateAt = lifecycle.nextDeactivationDate;
       if (user.status === 'active' && isAutoDeactivationDue(user)) {
         user.status = 'inactive';
       }
@@ -1407,9 +1540,10 @@ class DataStore {
     return levels;
   }
 
-  public saveLevel(level: AcademicLevel): void {
+  public saveLevel(level: AcademicLevel, actorId?: string): void {
     const levels = this.getLevels();
     const idx = levels.findIndex((l) => l.id === level.id);
+    const existing = idx >= 0 ? levels[idx] : undefined;
     if (idx >= 0) {
       levels[idx] = level;
     } else {
@@ -1419,6 +1553,19 @@ class DataStore {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('eduform_levels_updated'));
     }
+    if (actorId) {
+      this.addAuditLog({
+        actorId,
+        action: existing ? 'LEVEL_UPDATED' : 'LEVEL_CREATED',
+        targetType: 'level',
+        targetId: level.id,
+        meta: {
+          levelName: level.name,
+          previousName: existing?.name,
+          order: level.order,
+        },
+      });
+    }
     try {
       setDoc(doc(db, 'levels', level.id), sanitizeForFirestore(level), { merge: true }).catch((err) =>
         console.warn('Async level save to Firestore deferred:', err)
@@ -1426,11 +1573,23 @@ class DataStore {
     } catch {}
   }
 
-  public deleteLevel(id: string): void {
+  public deleteLevel(id: string, actorId?: string): void {
+    const existing = this.getLevels().find((l) => l.id === id);
     const levels = this.getLevels().filter((l) => l.id !== id);
     saveStore(STORAGE_KEYS.LEVELS, levels);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('eduform_levels_updated'));
+    }
+    if (actorId) {
+      this.addAuditLog({
+        actorId,
+        action: 'LEVEL_DELETED',
+        targetType: 'level',
+        targetId: id,
+        meta: {
+          levelName: existing?.name || id,
+        },
+      });
     }
     try {
       deleteDoc(doc(db, 'levels', id)).catch((err) =>
@@ -1448,9 +1607,10 @@ class DataStore {
     return this.getClasses().find((c) => c.id === id);
   }
 
-  public saveClass(cls: AcademicClass): void {
+  public saveClass(cls: AcademicClass, actorId?: string): void {
     const classes = this.getClasses();
     const idx = classes.findIndex((c) => c.id === cls.id);
+    const existing = idx >= 0 ? classes[idx] : undefined;
     if (idx >= 0) {
       classes[idx] = cls;
     } else {
@@ -1460,6 +1620,36 @@ class DataStore {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('eduform_classes_updated'));
     }
+
+    const levels = this.getLevels();
+    const subjects = this.getSubjects();
+    const levelName = levels.find((l) => l.id === cls.levelId)?.name || cls.levelId;
+    const subjectNames = (cls.subjectIds || []).map(
+      (sid) => subjects.find((s) => s.id === sid)?.name || sid
+    );
+    const prevSubjectIds = new Set(existing?.subjectIds || []);
+    const nextSubjectIds = new Set(cls.subjectIds || []);
+    const addedSubjectIds = (cls.subjectIds || []).filter((sid) => !prevSubjectIds.has(sid));
+    const removedSubjectIds = (existing?.subjectIds || []).filter((sid) => !nextSubjectIds.has(sid));
+
+    this.addAuditLog({
+      actorId: actorId || 'admin',
+      action: existing ? 'CLASS_UPDATED' : 'CLASS_CREATED',
+      targetType: 'class',
+      targetId: cls.id,
+      meta: {
+        className: cls.name,
+        previousName: existing?.name,
+        levelId: cls.levelId,
+        levelName,
+        previousLevelId: existing?.levelId,
+        subjectIds: cls.subjectIds || [],
+        subjectNames,
+        addedSubjectIds,
+        removedSubjectIds,
+      },
+    });
+
     try {
       setDoc(doc(db, 'classes', cls.id), sanitizeForFirestore(cls), { merge: true }).catch((err) =>
         console.warn('Async class save to Firestore deferred:', err)
@@ -1467,13 +1657,16 @@ class DataStore {
     } catch {}
   }
 
-  public deleteClass(id: string): void {
+  public deleteClass(id: string, actorId?: string): void {
+    const targetClass = this.getClassById(id);
     const classes = this.getClasses().filter((c) => c.id !== id);
     saveStore(STORAGE_KEYS.CLASSES, classes);
 
+    let affectedUsers = 0;
     // Unassign class from users
     const users = this.getUsers().map((u) => {
       if (u.classIds && u.classIds.includes(id)) {
+        affectedUsers++;
         return { ...u, classIds: u.classIds.filter((cid) => cid !== id) };
       }
       return u;
@@ -1489,8 +1682,21 @@ class DataStore {
     });
     saveStore(STORAGE_KEYS.LESSONS, lessons);
 
+    this.addAuditLog({
+      actorId: actorId || 'admin',
+      action: 'CLASS_DELETED',
+      targetType: 'class',
+      targetId: id,
+      meta: {
+        className: targetClass?.name || id,
+        levelId: targetClass?.levelId,
+        affectedUsers,
+      },
+    });
+
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('eduform_classes_updated'));
+      window.dispatchEvent(new CustomEvent('eduform_users_updated'));
     }
     try {
       deleteDoc(doc(db, 'classes', id)).catch((err) =>
@@ -1691,7 +1897,16 @@ class DataStore {
     return this.getQuizzes().find((q) => q.id === id);
   }
 
-  public saveQuiz(quiz: Quiz): void {
+  public saveQuiz(
+    quiz: Quiz,
+    actorId?: string,
+    explicitAction?:
+      | 'QUIZ_CREATED'
+      | 'QUIZ_UPDATED'
+      | 'QUIZ_DUPLICATED'
+      | 'QUIZ_REACTIVATED'
+      | 'QUIZ_STATUS_CHANGED'
+  ): void {
     // Enforce quiz validation before saving to the database
     const validation = assertValidQuiz(quiz);
     const normalizedQuiz: Quiz = {
@@ -1707,6 +1922,7 @@ class DataStore {
     };
     const quizzes = this.getQuizzes();
     const idx = quizzes.findIndex((q) => q.id === normalizedQuiz.id);
+    const existing = idx >= 0 ? quizzes[idx] : undefined;
     if (idx >= 0) {
       quizzes[idx] = normalizedQuiz;
     } else {
@@ -1717,6 +1933,44 @@ class DataStore {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('eduform_quizzes_updated'));
     }
+
+    const action =
+      explicitAction ||
+      (!existing
+        ? 'QUIZ_CREATED'
+        : existing.status !== normalizedQuiz.status || existing.isActive !== normalizedQuiz.isActive
+          ? 'QUIZ_STATUS_CHANGED'
+          : 'QUIZ_UPDATED');
+
+    const subjects = this.getSubjects();
+    const classes = this.getClasses();
+    const subjectName =
+      subjects.find((s) => s.id === normalizedQuiz.subjectId)?.name || normalizedQuiz.subjectId;
+    const classNames = (normalizedQuiz.classIds || []).map(
+      (cid) => classes.find((c) => c.id === cid)?.name || cid
+    );
+
+    this.addAuditLog({
+      actorId: actorId || normalizedQuiz.createdBy || 'staff',
+      action,
+      targetType: 'quiz',
+      targetId: normalizedQuiz.id,
+      meta: {
+        title: normalizedQuiz.title,
+        subjectId: normalizedQuiz.subjectId,
+        subjectName,
+        classIds: normalizedQuiz.classIds || [],
+        classNames,
+        status: normalizedQuiz.status,
+        previousStatus: existing?.status,
+        isActive: normalizedQuiz.isActive ?? true,
+        questionCount: normalizedQuiz.questions?.length || 0,
+        totalMarks: normalizedQuiz.totalMarks,
+        batchLabel: normalizedQuiz.batchLabel,
+        startDate: normalizedQuiz.startDate,
+        endDate: normalizedQuiz.endDate,
+      },
+    });
 
     // Sync to Firestore immediately with size safeguard
     try {
@@ -1729,12 +1983,26 @@ class DataStore {
     }
   }
 
-  public deleteQuiz(id: string): void {
+  public deleteQuiz(id: string, actorId?: string): void {
+    const existing = this.getQuizById(id);
     const quizzes = this.getQuizzes().filter((q) => q.id !== id);
     saveStore(STORAGE_KEYS.QUIZZES, quizzes);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('eduform_quizzes_updated'));
     }
+    this.addAuditLog({
+      actorId: actorId || existing?.createdBy || 'staff',
+      action: 'QUIZ_DELETED',
+      targetType: 'quiz',
+      targetId: id,
+      meta: {
+        title: existing?.title || id,
+        subjectId: existing?.subjectId,
+        classIds: existing?.classIds || [],
+        status: existing?.status,
+        totalMarks: existing?.totalMarks,
+      },
+    });
     try {
       deleteDoc(doc(db, 'quizzes', id)).catch((err) => {
         console.warn('Failed to delete quiz from Firestore:', err);
@@ -1950,18 +2218,33 @@ class DataStore {
 
   // --- Audit Logs ---
   public getAuditLogs(): AuditLog[] {
-    return getStoredOrInit<AuditLog[]>(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
+    const logs = getStoredOrInit<AuditLog[]>(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
+    return [...logs].sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
   }
 
-  public addAuditLog(log: Omit<AuditLog, 'id' | 'timestamp'>): void {
-    const logs = this.getAuditLogs();
+  public addAuditLog(log: Omit<AuditLog, 'id' | 'timestamp'> & { timestamp?: string }): AuditLog {
+    const logs = getStoredOrInit<AuditLog[]>(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
+    const uniqueSuffix = Math.random().toString(36).slice(2, 7);
     const newLog: AuditLog = {
       ...log,
-      id: `audit-${Date.now()}`,
-      timestamp: new Date().toISOString(),
+      id: `audit-${Date.now()}-${uniqueSuffix}`,
+      timestamp: log.timestamp || new Date().toISOString(),
     };
     logs.unshift(newLog);
     saveStore(STORAGE_KEYS.AUDIT_LOGS, logs);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('eduform_audit_logs_updated', { detail: newLog }));
+    }
+    try {
+      setDoc(doc(db, 'auditLogs', newLog.id), sanitizeForFirestore(newLog)).catch((err) =>
+        console.warn('Async audit log sync to Firestore deferred:', err)
+      );
+    } catch {
+      // offline fallback
+    }
+    return newLog;
   }
 
   // --- Settings ---

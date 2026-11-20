@@ -18,6 +18,7 @@
         "createdBy": { "type": "string" },
         "createdAt": { "type": "string" },
         "lastLoginAt": { "type": "string" },
+        "reactivationDate": { "type": "string", "description": "Optional ISO date or timestamp after which an inactive user account automatically reactivates" },
         "deactivationDate": { "type": "string", "description": "Optional ISO date or timestamp threshold after which the user account automatically deactivates" },
         "autoDeactivateAt": { "type": "string", "description": "Optional ISO date or timestamp when user account automatically deactivates" }
       },

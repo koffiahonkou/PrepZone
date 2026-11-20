@@ -34,12 +34,19 @@ import {
   isDeveloperAccount,
   isAutoDeactivationDue,
   getDeactivationThreshold,
+  getReactivationThreshold,
+  isOldOrDormantAccount,
+  evaluateAccountLifecycle,
   formatAutoDeactivateDateTime,
   toDateInputAndTime,
   combineDateAndTimeToIso,
   parseDeactivationTimestamp,
 } from '@/src/utils/accountLifecycle';
-import { updateUserAsAdmin, deleteUserAsAdmin } from '@/src/services/userAdminService';
+import {
+  updateUserAsAdmin,
+  deleteUserAsAdmin,
+  updateUserLifecycleDates,
+} from '@/src/services/userAdminService';
 import { toast } from 'sonner';
 
 export const AdminUsersPage: React.FC = () => {
@@ -87,8 +94,18 @@ export const AdminUsersPage: React.FC = () => {
   const [formSubjectIds, setFormSubjectIds] = useState<string[]>([]);
   const [formPassword, setFormPassword] = useState('Eduform123!');
   const [showModalPassword, setShowModalPassword] = useState(false);
+  const [formReactivateDate, setFormReactivateDate] = useState('');
+  const [formReactivateTime, setFormReactivateTime] = useState('00:00');
   const [formAutoDeactivateDate, setFormAutoDeactivateDate] = useState('');
   const [formAutoDeactivateTime, setFormAutoDeactivateTime] = useState('00:00');
+
+  // Dedicated Reactivation & Deactivation Schedule Modal State
+  const [scheduleTargetUser, setScheduleTargetUser] = useState<UserProfile | null>(null);
+  const [schedReactDate, setSchedReactDate] = useState('');
+  const [schedReactTime, setSchedReactTime] = useState('00:00');
+  const [schedDeactDate, setSchedDeactDate] = useState('');
+  const [schedDeactTime, setSchedDeactTime] = useState('00:00');
+  const [isSavingSchedule, setIsSavingSchedule] = useState(false);
 
   // Delete State
   const [deleteTarget, setDeleteTarget] = useState<UserProfile | null>(null);
@@ -106,7 +123,11 @@ export const AdminUsersPage: React.FC = () => {
       return;
     }
     const cleanPw = adminNewPassword.trim();
-    const res = dataStore.resetUserPassword(resetTargetUser.username, cleanPw, 'admin');
+    const res = dataStore.resetUserPassword(
+      resetTargetUser.username,
+      cleanPw,
+      currentLoggedInUser?.uid || 'admin'
+    );
     if (!res.success) {
       toast.error(res.error || 'Failed to reset password.');
       return;
@@ -146,7 +167,14 @@ export const AdminUsersPage: React.FC = () => {
       u.authEmail.toLowerCase().includes(search.toLowerCase());
 
     const matchesRole = roleFilter === 'all' || u.role === roleFilter;
-    const matchesStatus = statusFilter === 'all' || u.status === statusFilter;
+    const matchesStatus =
+      statusFilter === 'all'
+        ? true
+        : statusFilter === 'old_dormant'
+          ? isOldOrDormantAccount(u)
+          : statusFilter === 'scheduled'
+            ? Boolean(getReactivationThreshold(u) || getDeactivationThreshold(u))
+            : u.status === statusFilter;
     const matchesClass =
       classFilter === 'all' || (u.classIds && u.classIds.includes(classFilter));
     const matchesLevel =
@@ -172,7 +200,22 @@ export const AdminUsersPage: React.FC = () => {
       deactivationDate: nextThreshold,
       autoDeactivateAt: nextThreshold,
     };
-    dataStore.saveUser(updated);
+    dataStore.saveUser(updated, currentLoggedInUser?.uid);
+    dataStore.addAuditLog({
+      actorId: currentLoggedInUser?.uid || 'admin',
+      action: 'USER_STATUS_CHANGED',
+      targetType: 'user',
+      targetId: updated.uid,
+      meta: {
+        username: updated.username,
+        fullName: updated.fullName,
+        role: updated.role,
+        previousStatus: target.status,
+        newStatus,
+        deactivationDate: updated.deactivationDate,
+        expiredScheduleCleared: hadExpiredSchedule,
+      },
+    });
     setUsers(dataStore.getUsers());
     if (hadExpiredSchedule) {
       toast.success(`User @${target.username} reactivated (expired auto-deactivation date cleared).`);
@@ -194,6 +237,8 @@ export const AdminUsersPage: React.FC = () => {
     setFormSubjectIds(subjects.slice(0, 4).map((s) => s.id));
     setFormPassword('Eduform123!');
     setShowModalPassword(false);
+    setFormReactivateDate('');
+    setFormReactivateTime('00:00');
     setFormAutoDeactivateDate('');
     setFormAutoDeactivateTime('00:00');
     setIsModalOpen(true);
@@ -216,21 +261,105 @@ export const AdminUsersPage: React.FC = () => {
     setFormSubjectIds(u.subjectIds || []);
     setFormPassword(u.password || 'Eduform123!');
     setShowModalPassword(false);
-    const { date, time } = toDateInputAndTime(getDeactivationThreshold(u));
-    setFormAutoDeactivateDate(date);
-    setFormAutoDeactivateTime(time);
+    const reactParts = toDateInputAndTime(getReactivationThreshold(u));
+    setFormReactivateDate(reactParts.date);
+    setFormReactivateTime(reactParts.time);
+    const deactParts = toDateInputAndTime(getDeactivationThreshold(u));
+    setFormAutoDeactivateDate(deactParts.date);
+    setFormAutoDeactivateTime(deactParts.time);
     setIsModalOpen(true);
   };
 
-  const applyDeactivationPreset = (daysFromNow: number) => {
+  const openScheduleModal = (u: UserProfile) => {
+    if (isDeveloperAccount(u)) {
+      toast.error('The developer superuser account is permanently active and cannot be scheduled.');
+      return;
+    }
+    setScheduleTargetUser(u);
+    const reactParts = toDateInputAndTime(getReactivationThreshold(u));
+    setSchedReactDate(reactParts.date);
+    setSchedReactTime(reactParts.time);
+    const deactParts = toDateInputAndTime(getDeactivationThreshold(u));
+    setSchedDeactDate(deactParts.date);
+    setSchedDeactTime(deactParts.time);
+  };
+
+  const toLocalDateInput = (daysFromNow: number): string => {
     const target = new Date();
     target.setDate(target.getDate() + daysFromNow);
     const year = target.getFullYear();
     const month = String(target.getMonth() + 1).padStart(2, '0');
     const day = String(target.getDate()).padStart(2, '0');
-    setFormAutoDeactivateDate(`${year}-${month}-${day}`);
+    return `${year}-${month}-${day}`;
+  };
+
+  const applyDeactivationPreset = (daysFromNow: number) => {
+    setFormAutoDeactivateDate(toLocalDateInput(daysFromNow));
     if (!formAutoDeactivateTime) {
       setFormAutoDeactivateTime('00:00');
+    }
+  };
+
+  const applyReactivationPreset = (daysFromNow: number) => {
+    setFormReactivateDate(toLocalDateInput(daysFromNow));
+    if (!formReactivateTime) {
+      setFormReactivateTime('00:00');
+    }
+  };
+
+  const handleSaveScheduleModal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!scheduleTargetUser) return;
+
+    const reactivationIso = combineDateAndTimeToIso(schedReactDate, schedReactTime || '00:00');
+    const deactivationIso = combineDateAndTimeToIso(schedDeactDate, schedDeactTime || '00:00');
+
+    const reactTs = parseDeactivationTimestamp(reactivationIso);
+    const deactTs = parseDeactivationTimestamp(deactivationIso);
+    const nowMs = Date.now();
+
+    // Prevent setting a new deactivation date on or before a new reactivation date
+    if (reactTs !== null && deactTs !== null && deactTs <= reactTs) {
+      const existingExpiredDeact =
+        scheduleTargetUser.status === 'inactive' &&
+        parseDeactivationTimestamp(getDeactivationThreshold(scheduleTargetUser)) === deactTs &&
+        deactTs <= nowMs;
+      if (!existingExpiredDeact) {
+        toast.error('Auto-deactivation date must be later than the scheduled reactivation date.');
+        return;
+      }
+    }
+
+    setIsSavingSchedule(true);
+    try {
+      const updated = await updateUserLifecycleDates(
+        scheduleTargetUser.uid,
+        {
+          reactivationDate: reactivationIso,
+          deactivationDate: deactivationIso,
+        },
+        currentLoggedInUser?.uid || 'admin'
+      );
+      setUsers(dataStore.getUsers());
+      setScheduleTargetUser(null);
+
+      if (updated.status === 'active' && scheduleTargetUser.status === 'inactive') {
+        toast.success(
+          `@${updated.username} reactivated${
+            updated.deactivationDate
+              ? ` and scheduled to deactivate on ${formatAutoDeactivateDateTime(updated.deactivationDate)}.`
+              : '.'
+          }`
+        );
+      } else if (updated.status === 'inactive' && scheduleTargetUser.status === 'active') {
+        toast.info(`@${updated.username} deactivated immediately based on schedule.`);
+      } else {
+        toast.success(`Lifecycle schedule updated for @${updated.username}.`);
+      }
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update lifecycle schedule.');
+    } finally {
+      setIsSavingSchedule(false);
     }
   };
 
@@ -276,9 +405,27 @@ export const AdminUsersPage: React.FC = () => {
     const finalPassword = formPassword.trim() || 'Eduform123!';
     const isDevTarget = editingUser?.role === 'developer' || formRole === 'developer';
 
+    let computedReactivateAt: string | null = isDevTarget
+      ? null
+      : combineDateAndTimeToIso(formReactivateDate, formReactivateTime || '00:00');
+
     let computedAutoDeactivateAt: string | null = isDevTarget
       ? null
       : combineDateAndTimeToIso(formAutoDeactivateDate, formAutoDeactivateTime || '00:00');
+
+    const reactTs = parseDeactivationTimestamp(computedReactivateAt);
+    const deactTs = parseDeactivationTimestamp(computedAutoDeactivateAt);
+    if (!isDevTarget && reactTs !== null && deactTs !== null && deactTs <= reactTs) {
+      const unchangedExpiredDeact =
+        Boolean(editingUser) &&
+        editingUser?.status === 'inactive' &&
+        parseDeactivationTimestamp(getDeactivationThreshold(editingUser)) === deactTs &&
+        deactTs <= Date.now();
+      if (!unchangedExpiredDeact) {
+        toast.error('Auto-deactivation date must be later than the scheduled reactivation date.');
+        return;
+      }
+    }
 
     let effectiveStatus: UserStatus = isDevTarget ? 'active' : formStatus;
     let clearedExpiredSchedule = false;
@@ -295,7 +442,7 @@ export const AdminUsersPage: React.FC = () => {
       if (unchangedExpiredSchedule) {
         computedAutoDeactivateAt = null;
         clearedExpiredSchedule = true;
-      } else if (isPastDue && effectiveStatus === 'active') {
+      } else if (isPastDue && effectiveStatus === 'active' && (reactTs === null || reactTs <= ts)) {
         effectiveStatus = 'inactive';
       }
     }
@@ -309,6 +456,7 @@ export const AdminUsersPage: React.FC = () => {
             username: formUsername.trim(),
             role: editingUser.role === 'developer' ? 'developer' : formRole,
             status: effectiveStatus,
+            reactivationDate: computedReactivateAt,
             deactivationDate: computedAutoDeactivateAt,
             levelIds: formLevelIds,
             classIds: formClassIds,
@@ -319,7 +467,7 @@ export const AdminUsersPage: React.FC = () => {
         );
         if (clearedExpiredSchedule) {
           toast.success(`Account for @${updated.username} reactivated and expired auto-deactivation date cleared.`);
-        } else if (effectiveStatus === 'inactive' && formStatus === 'active' && computedAutoDeactivateAt) {
+        } else if (effectiveStatus === 'inactive' && formStatus === 'active' && computedAutoDeactivateAt && !computedReactivateAt) {
           toast.info(`Account for @${updated.username} saved as deactivated because the scheduled date has already passed.`);
         } else {
           toast.success(`Account for ${updated.fullName} (@${updated.username}) updated.`);
@@ -333,6 +481,7 @@ export const AdminUsersPage: React.FC = () => {
           fullName: formFullName.trim(),
           role: formRole === 'developer' ? 'student' : formRole,
           status: effectiveStatus,
+          reactivationDate: computedReactivateAt,
           deactivationDate: computedAutoDeactivateAt,
           autoDeactivateAt: computedAutoDeactivateAt,
           levelIds: formLevelIds,
@@ -344,6 +493,43 @@ export const AdminUsersPage: React.FC = () => {
           lastLoginAt: null,
         };
         dataStore.saveUser(newUser, currentLoggedInUser?.uid);
+        const classNames = (newUser.classIds || []).map((cid) => getClassName(cid));
+        dataStore.addAuditLog({
+          actorId: currentLoggedInUser?.uid || 'admin',
+          action: 'USER_CREATED',
+          targetType: 'user',
+          targetId: newUser.uid,
+          meta: {
+            username: newUser.username,
+            fullName: newUser.fullName,
+            role: newUser.role,
+            status: newUser.status,
+            classIds: newUser.classIds,
+            classNames,
+            levelIds: newUser.levelIds,
+            reactivationDate: newUser.reactivationDate ?? null,
+            deactivationDate: newUser.deactivationDate ?? null,
+          },
+        });
+        if (newUser.classIds.length > 0) {
+          dataStore.addAuditLog({
+            actorId: currentLoggedInUser?.uid || 'admin',
+            action: 'USER_CLASS_ASSIGNMENTS_UPDATED',
+            targetType: 'class_assignment',
+            targetId: newUser.uid,
+            meta: {
+              username: newUser.username,
+              fullName: newUser.fullName,
+              role: newUser.role,
+              classIds: newUser.classIds,
+              classNames,
+              addedClassIds: newUser.classIds,
+              addedClassNames: classNames,
+              removedClassIds: [],
+              removedClassNames: [],
+            },
+          });
+        }
         if (effectiveStatus === 'inactive' && formStatus === 'active' && computedAutoDeactivateAt) {
           toast.info(`Account @${newUser.username} created as deactivated because the scheduled date has already passed.`);
         } else {
@@ -510,6 +696,8 @@ export const AdminUsersPage: React.FC = () => {
             <option value="all">All Statuses</option>
             <option value="active">Active Only</option>
             <option value="inactive">Deactivated</option>
+            <option value="old_dormant">Old / Inactive Accounts</option>
+            <option value="scheduled">Scheduled Dates Set</option>
           </select>
         </div>
       </div>
@@ -571,6 +759,17 @@ export const AdminUsersPage: React.FC = () => {
                               )}
                             </div>
                             <p className="text-[11px] text-slate-400 font-mono">@{u.username}</p>
+                            {u.role !== 'developer' && (
+                              <p
+                                className={`text-[10px] mt-0.5 tabular-nums ${
+                                  isOldOrDormantAccount(u) ? 'text-amber-700 font-medium' : 'text-slate-400'
+                                }`}
+                              >
+                                {u.lastLoginAt
+                                  ? `Last active: ${new Date(u.lastLoginAt).toLocaleDateString()}`
+                                  : `Created: ${new Date(u.createdAt).toLocaleDateString()} · No logins`}
+                              </p>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -684,9 +883,20 @@ export const AdminUsersPage: React.FC = () => {
                               </>
                             )}
                           </span>
+                          {u.role !== 'developer' && getReactivationThreshold(u) && (
+                            <span
+                              className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700 tabular-nums"
+                              title={`Scheduled automatic reactivation: ${formatAutoDeactivateDateTime(getReactivationThreshold(u))}`}
+                            >
+                              <RefreshCw className="w-2.5 h-2.5 shrink-0" />
+                              <span>
+                                Reactivates: {formatAutoDeactivateDateTime(getReactivationThreshold(u))}
+                              </span>
+                            </span>
+                          )}
                           {u.role !== 'developer' && getDeactivationThreshold(u) && (
                             <span
-                              className={`inline-flex items-center gap-1 text-[10px] font-medium ${
+                              className={`inline-flex items-center gap-1 text-[10px] font-medium tabular-nums ${
                                 u.status === 'active' ? 'text-amber-700' : 'text-slate-500'
                               }`}
                               title={`Scheduled auto-deactivation: ${formatAutoDeactivateDateTime(getDeactivationThreshold(u))}`}
@@ -736,6 +946,19 @@ export const AdminUsersPage: React.FC = () => {
                               }`}
                             >
                               {u.status === 'active' ? 'Deactivate' : 'Activate'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openScheduleModal(u)}
+                              className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold border transition-colors cursor-pointer ${
+                                isOldOrDormantAccount(u)
+                                  ? 'border-blue-200 text-blue-700 bg-blue-50/70 hover:bg-blue-100/80'
+                                  : 'border-slate-200 text-slate-600 hover:text-[#0F2A4A] hover:bg-slate-100'
+                              }`}
+                              title="Set automatic reactivation and deactivation dates"
+                            >
+                              <Calendar className="w-3 h-3" />
+                              <span>Dates</span>
                             </button>
                             <button
                               type="button"
@@ -880,112 +1103,215 @@ export const AdminUsersPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Automatic Deactivation Schedule (Non-Developer Accounts) */}
+                {/* Automatic Reactivation & Deactivation Schedule (Non-Developer Accounts) */}
                 {formRole !== 'developer' && editingUser?.role !== 'developer' && (
-                  <div className="p-3.5 bg-amber-50/60 rounded-xl border border-amber-200/80 space-y-2.5">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <label className="text-xs font-bold uppercase text-[#0F2A4A] flex items-center gap-1.5">
-                        <Calendar className="w-3.5 h-3.5 text-amber-600" />
-                        Auto-Deactivation Date (Optional)
-                      </label>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => applyDeactivationPreset(7)}
-                          className="px-2 py-0.5 rounded text-[11px] font-semibold bg-white border border-amber-200 text-amber-800 hover:bg-amber-100/70 transition-colors cursor-pointer"
-                        >
-                          +7d
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => applyDeactivationPreset(30)}
-                          className="px-2 py-0.5 rounded text-[11px] font-semibold bg-white border border-amber-200 text-amber-800 hover:bg-amber-100/70 transition-colors cursor-pointer"
-                        >
-                          +30d
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => applyDeactivationPreset(90)}
-                          className="px-2 py-0.5 rounded text-[11px] font-semibold bg-white border border-amber-200 text-amber-800 hover:bg-amber-100/70 transition-colors cursor-pointer"
-                        >
-                          +90d
-                        </button>
-                        {formAutoDeactivateDate && (
+                  <div className="space-y-3">
+                    {/* Reactivation Date (Optional) */}
+                    <div className="p-3.5 bg-emerald-50/55 rounded-xl border border-emerald-200/80 space-y-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <label className="text-xs font-bold uppercase text-[#0F2A4A] flex items-center gap-1.5">
+                          <RefreshCw className="w-3.5 h-3.5 text-emerald-600" />
+                          Reactivation Date (Optional)
+                        </label>
+                        <div className="flex items-center gap-1.5">
                           <button
                             type="button"
-                            onClick={() => {
-                              setFormAutoDeactivateDate('');
-                              setFormAutoDeactivateTime('00:00');
-                            }}
-                            className="px-2 py-0.5 rounded text-[11px] font-semibold text-rose-600 hover:bg-rose-50 border border-rose-200 bg-white transition-colors cursor-pointer"
+                            onClick={() => applyReactivationPreset(0)}
+                            className="px-2 py-0.5 rounded text-[11px] font-semibold bg-white border border-emerald-200 text-emerald-800 hover:bg-emerald-100/70 transition-colors cursor-pointer"
                           >
-                            Clear
+                            Today
                           </button>
-                        )}
+                          <button
+                            type="button"
+                            onClick={() => applyReactivationPreset(7)}
+                            className="px-2 py-0.5 rounded text-[11px] font-semibold bg-white border border-emerald-200 text-emerald-800 hover:bg-emerald-100/70 transition-colors cursor-pointer"
+                          >
+                            +7d
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => applyReactivationPreset(30)}
+                            className="px-2 py-0.5 rounded text-[11px] font-semibold bg-white border border-emerald-200 text-emerald-800 hover:bg-emerald-100/70 transition-colors cursor-pointer"
+                          >
+                            +30d
+                          </button>
+                          {formReactivateDate && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormReactivateDate('');
+                                setFormReactivateTime('00:00');
+                              }}
+                              className="px-2 py-0.5 rounded text-[11px] font-semibold text-rose-600 hover:bg-rose-50 border border-rose-200 bg-white transition-colors cursor-pointer"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
                       </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                          <span className="block text-[11px] font-medium text-slate-600 mb-1">
+                            Reactivation Date
+                          </span>
+                          <input
+                            type="date"
+                            value={formReactivateDate}
+                            onChange={(e) => setFormReactivateDate(e.target.value)}
+                            className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-lg bg-white focus:outline-hidden focus:border-[#0F2A4A]"
+                          />
+                        </div>
+                        <div>
+                          <span className="block text-[11px] font-medium text-slate-600 mb-1 flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-slate-400" /> Time (Local)
+                          </span>
+                          <input
+                            type="time"
+                            value={formReactivateTime}
+                            disabled={!formReactivateDate}
+                            onChange={(e) => setFormReactivateTime(e.target.value || '00:00')}
+                            className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-lg bg-white disabled:bg-slate-100 disabled:text-slate-400 focus:outline-hidden focus:border-[#0F2A4A]"
+                          />
+                        </div>
+                      </div>
+
+                      {(() => {
+                        const reactIso = combineDateAndTimeToIso(
+                          formReactivateDate,
+                          formReactivateTime || '00:00'
+                        );
+                        if (!reactIso) {
+                          return (
+                            <p className="text-[11px] text-slate-500">
+                              Set a future date to automatically re-enable an old or deactivated account.
+                            </p>
+                          );
+                        }
+                        const ts = parseDeactivationTimestamp(reactIso);
+                        const isPast = ts !== null && ts <= Date.now();
+                        const formatted = formatAutoDeactivateDateTime(reactIso);
+                        if (isPast) {
+                          return (
+                            <p className="text-[11px] text-emerald-700 font-medium">
+                              Reactivation time ({formatted}) is already reached — saving will restore access immediately (unless overridden by a newer deactivation date).
+                            </p>
+                          );
+                        }
+                        return (
+                          <p className="text-[11px] text-emerald-800 font-medium">
+                            Deactivated account access will automatically restore on <strong>{formatted}</strong>.
+                          </p>
+                        );
+                      })()}
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      <div>
-                        <span className="block text-[11px] font-medium text-slate-600 mb-1">
-                          Deactivation Date
-                        </span>
-                        <input
-                          type="date"
-                          value={formAutoDeactivateDate}
-                          onChange={(e) => setFormAutoDeactivateDate(e.target.value)}
-                          className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-lg bg-white focus:outline-hidden focus:border-[#0F2A4A]"
-                        />
+                    {/* Auto-Deactivation Date (Optional) */}
+                    <div className="p-3.5 bg-amber-50/60 rounded-xl border border-amber-200/80 space-y-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <label className="text-xs font-bold uppercase text-[#0F2A4A] flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-amber-600" />
+                          Auto-Deactivation Date (Optional)
+                        </label>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => applyDeactivationPreset(7)}
+                            className="px-2 py-0.5 rounded text-[11px] font-semibold bg-white border border-amber-200 text-amber-800 hover:bg-amber-100/70 transition-colors cursor-pointer"
+                          >
+                            +7d
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => applyDeactivationPreset(30)}
+                            className="px-2 py-0.5 rounded text-[11px] font-semibold bg-white border border-amber-200 text-amber-800 hover:bg-amber-100/70 transition-colors cursor-pointer"
+                          >
+                            +30d
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => applyDeactivationPreset(90)}
+                            className="px-2 py-0.5 rounded text-[11px] font-semibold bg-white border border-amber-200 text-amber-800 hover:bg-amber-100/70 transition-colors cursor-pointer"
+                          >
+                            +90d
+                          </button>
+                          {formAutoDeactivateDate && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormAutoDeactivateDate('');
+                                setFormAutoDeactivateTime('00:00');
+                              }}
+                              className="px-2 py-0.5 rounded text-[11px] font-semibold text-rose-600 hover:bg-rose-50 border border-rose-200 bg-white transition-colors cursor-pointer"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
                       </div>
-                      <div>
-                        <span className="block text-[11px] font-medium text-slate-600 mb-1 flex items-center gap-1">
-                          <Clock className="w-3 h-3 text-slate-400" /> Time (Local)
-                        </span>
-                        <input
-                          type="time"
-                          value={formAutoDeactivateTime}
-                          disabled={!formAutoDeactivateDate}
-                          onChange={(e) => setFormAutoDeactivateTime(e.target.value || '00:00')}
-                          className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-lg bg-white disabled:bg-slate-100 disabled:text-slate-400 focus:outline-hidden focus:border-[#0F2A4A]"
-                        />
-                      </div>
-                    </div>
 
-                    {(() => {
-                      const previewIso = combineDateAndTimeToIso(
-                        formAutoDeactivateDate,
-                        formAutoDeactivateTime || '00:00'
-                      );
-                      if (!previewIso) {
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                          <span className="block text-[11px] font-medium text-slate-600 mb-1">
+                            Deactivation Date
+                          </span>
+                          <input
+                            type="date"
+                            value={formAutoDeactivateDate}
+                            onChange={(e) => setFormAutoDeactivateDate(e.target.value)}
+                            className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-lg bg-white focus:outline-hidden focus:border-[#0F2A4A]"
+                          />
+                        </div>
+                        <div>
+                          <span className="block text-[11px] font-medium text-slate-600 mb-1 flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-slate-400" /> Time (Local)
+                          </span>
+                          <input
+                            type="time"
+                            value={formAutoDeactivateTime}
+                            disabled={!formAutoDeactivateDate}
+                            onChange={(e) => setFormAutoDeactivateTime(e.target.value || '00:00')}
+                            className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-lg bg-white disabled:bg-slate-100 disabled:text-slate-400 focus:outline-hidden focus:border-[#0F2A4A]"
+                          />
+                        </div>
+                      </div>
+
+                      {(() => {
+                        const previewIso = combineDateAndTimeToIso(
+                          formAutoDeactivateDate,
+                          formAutoDeactivateTime || '00:00'
+                        );
+                        if (!previewIso) {
+                          return (
+                            <p className="text-[11px] text-slate-500">
+                              Leave blank to keep the account active indefinitely until manually deactivated.
+                            </p>
+                          );
+                        }
+                        const ts = parseDeactivationTimestamp(previewIso);
+                        const isPast = ts !== null && ts <= Date.now();
+                        const formatted = formatAutoDeactivateDateTime(previewIso);
+                        if (isPast && editingUser?.status === 'inactive' && formStatus === 'active' && parseDeactivationTimestamp(getDeactivationThreshold(editingUser)) === ts) {
+                          return (
+                            <p className="text-[11px] text-emerald-700 font-medium">
+                              Previous deactivation date ({formatted}) has passed — saving with Active status will clear it automatically.
+                            </p>
+                          );
+                        }
+                        if (isPast) {
+                          return (
+                            <p className="text-[11px] text-rose-700 font-medium">
+                              Selected date/time ({formatted}) has already passed — saving will deactivate this account immediately.
+                            </p>
+                          );
+                        }
                         return (
-                          <p className="text-[11px] text-slate-500">
-                            Leave blank to keep the account active indefinitely until manually deactivated.
+                          <p className="text-[11px] text-amber-800 font-medium">
+                            Account access will automatically lock on <strong>{formatted}</strong> (12:00 AM if no time chosen).
                           </p>
                         );
-                      }
-                      const ts = parseDeactivationTimestamp(previewIso);
-                      const isPast = ts !== null && ts <= Date.now();
-                      const formatted = formatAutoDeactivateDateTime(previewIso);
-                      if (isPast && editingUser?.status === 'inactive' && formStatus === 'active' && parseDeactivationTimestamp(getDeactivationThreshold(editingUser)) === ts) {
-                        return (
-                          <p className="text-[11px] text-emerald-700 font-medium">
-                            Previous deactivation date ({formatted}) has passed — saving with Active status will clear it automatically.
-                          </p>
-                        );
-                      }
-                      if (isPast) {
-                        return (
-                          <p className="text-[11px] text-rose-700 font-medium">
-                            Selected date/time ({formatted}) has already passed — saving will deactivate this account immediately.
-                          </p>
-                        );
-                      }
-                      return (
-                        <p className="text-[11px] text-amber-800 font-medium">
-                          Account access will automatically lock on <strong>{formatted}</strong> (12:00 AM if no time chosen).
-                        </p>
-                      );
-                    })()}
+                      })()}
+                    </div>
                   </div>
                 )}
 
@@ -1287,6 +1613,284 @@ export const AdminUsersPage: React.FC = () => {
                 >
                   <KeyRound className="w-3.5 h-3.5" />
                   <span>Update & Copy</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Account Reactivation & Deactivation Schedule Modal */}
+      {scheduleTargetUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 my-auto">
+            <div className="flex items-start justify-between gap-3 pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-700 flex items-center justify-center shrink-0">
+                  <Calendar className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[#0F2A4A]">
+                    Schedule Reactivation &amp; Deactivation
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {scheduleTargetUser.fullName} (<span className="font-mono">@{scheduleTargetUser.username}</span>) · Currently{' '}
+                    <span
+                      className={`font-semibold ${
+                        scheduleTargetUser.status === 'active' ? 'text-emerald-700' : 'text-rose-700'
+                      }`}
+                    >
+                      {scheduleTargetUser.status === 'active' ? 'Active' : 'Deactivated'}
+                    </span>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setScheduleTargetUser(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveScheduleModal} className="mt-4 space-y-4">
+              {isOldOrDormantAccount(scheduleTargetUser) && (
+                <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-[11px] text-slate-600 flex items-center justify-between gap-2">
+                  <span>
+                    {scheduleTargetUser.lastLoginAt
+                      ? `Last signed in on ${new Date(scheduleTargetUser.lastLoginAt).toLocaleDateString()}.`
+                      : `Created on ${new Date(scheduleTargetUser.createdAt).toLocaleDateString()} with no recorded sign-ins.`}
+                  </span>
+                  <span className="font-semibold text-amber-700 shrink-0">Old / Inactive Account</span>
+                </div>
+              )}
+
+              {/* Reactivation Date Section */}
+              <div className="p-3.5 bg-emerald-50/55 rounded-xl border border-emerald-200/80 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="text-xs font-bold uppercase text-[#0F2A4A] flex items-center gap-1.5">
+                    <RefreshCw className="w-3.5 h-3.5 text-emerald-600" />
+                    Reactivation Date
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSchedReactDate(toLocalDateInput(0));
+                        setSchedReactTime('00:00');
+                      }}
+                      className="px-2 py-0.5 rounded text-[11px] font-semibold bg-white border border-emerald-200 text-emerald-800 hover:bg-emerald-100/70 cursor-pointer"
+                    >
+                      Today
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSchedReactDate(toLocalDateInput(1));
+                        if (!schedReactTime) setSchedReactTime('00:00');
+                      }}
+                      className="px-2 py-0.5 rounded text-[11px] font-semibold bg-white border border-emerald-200 text-emerald-800 hover:bg-emerald-100/70 cursor-pointer"
+                    >
+                      +1d
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSchedReactDate(toLocalDateInput(7));
+                        if (!schedReactTime) setSchedReactTime('00:00');
+                      }}
+                      className="px-2 py-0.5 rounded text-[11px] font-semibold bg-white border border-emerald-200 text-emerald-800 hover:bg-emerald-100/70 cursor-pointer"
+                    >
+                      +7d
+                    </button>
+                    {schedReactDate && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSchedReactDate('');
+                          setSchedReactTime('00:00');
+                        }}
+                        className="px-2 py-0.5 rounded text-[11px] font-semibold text-rose-600 hover:bg-rose-50 border border-rose-200 bg-white cursor-pointer"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <span className="block text-[11px] font-medium text-slate-600 mb-1">Date</span>
+                    <input
+                      type="date"
+                      value={schedReactDate}
+                      onChange={(e) => setSchedReactDate(e.target.value)}
+                      className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-lg bg-white focus:outline-hidden focus:border-[#0F2A4A]"
+                    />
+                  </div>
+                  <div>
+                    <span className="block text-[11px] font-medium text-slate-600 mb-1 flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-slate-400" /> Time (Local)
+                    </span>
+                    <input
+                      type="time"
+                      value={schedReactTime}
+                      disabled={!schedReactDate}
+                      onChange={(e) => setSchedReactTime(e.target.value || '00:00')}
+                      className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-lg bg-white disabled:bg-slate-100 disabled:text-slate-400 focus:outline-hidden focus:border-[#0F2A4A]"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Deactivation Date Section */}
+              <div className="p-3.5 bg-amber-50/60 rounded-xl border border-amber-200/80 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="text-xs font-bold uppercase text-[#0F2A4A] flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-amber-600" />
+                    Auto-Deactivation Date
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSchedDeactDate(toLocalDateInput(7));
+                        if (!schedDeactTime) setSchedDeactTime('00:00');
+                      }}
+                      className="px-2 py-0.5 rounded text-[11px] font-semibold bg-white border border-amber-200 text-amber-800 hover:bg-amber-100/70 cursor-pointer"
+                    >
+                      +7d
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSchedDeactDate(toLocalDateInput(30));
+                        if (!schedDeactTime) setSchedDeactTime('00:00');
+                      }}
+                      className="px-2 py-0.5 rounded text-[11px] font-semibold bg-white border border-amber-200 text-amber-800 hover:bg-amber-100/70 cursor-pointer"
+                    >
+                      +30d
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSchedDeactDate(toLocalDateInput(90));
+                        if (!schedDeactTime) setSchedDeactTime('00:00');
+                      }}
+                      className="px-2 py-0.5 rounded text-[11px] font-semibold bg-white border border-amber-200 text-amber-800 hover:bg-amber-100/70 cursor-pointer"
+                    >
+                      +90d
+                    </button>
+                    {schedDeactDate && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSchedDeactDate('');
+                          setSchedDeactTime('00:00');
+                        }}
+                        className="px-2 py-0.5 rounded text-[11px] font-semibold text-rose-600 hover:bg-rose-50 border border-rose-200 bg-white cursor-pointer"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <span className="block text-[11px] font-medium text-slate-600 mb-1">Date</span>
+                    <input
+                      type="date"
+                      value={schedDeactDate}
+                      onChange={(e) => setSchedDeactDate(e.target.value)}
+                      className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-lg bg-white focus:outline-hidden focus:border-[#0F2A4A]"
+                    />
+                  </div>
+                  <div>
+                    <span className="block text-[11px] font-medium text-slate-600 mb-1 flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-slate-400" /> Time (Local)
+                    </span>
+                    <input
+                      type="time"
+                      value={schedDeactTime}
+                      disabled={!schedDeactDate}
+                      onChange={(e) => setSchedDeactTime(e.target.value || '00:00')}
+                      className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-lg bg-white disabled:bg-slate-100 disabled:text-slate-400 focus:outline-hidden focus:border-[#0F2A4A]"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Chronological Preview */}
+              {(() => {
+                const reactIso = combineDateAndTimeToIso(schedReactDate, schedReactTime || '00:00');
+                const deactIso = combineDateAndTimeToIso(schedDeactDate, schedDeactTime || '00:00');
+                const reactTs = parseDeactivationTimestamp(reactIso);
+                const deactTs = parseDeactivationTimestamp(deactIso);
+                const invalidOrder =
+                  reactTs !== null &&
+                  deactTs !== null &&
+                  deactTs <= reactTs &&
+                  !(
+                    scheduleTargetUser.status === 'inactive' &&
+                    parseDeactivationTimestamp(getDeactivationThreshold(scheduleTargetUser)) === deactTs &&
+                    deactTs <= Date.now()
+                  );
+
+                if (invalidOrder) {
+                  return (
+                    <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700 font-medium">
+                      Auto-deactivation date must be later than the scheduled reactivation date.
+                    </div>
+                  );
+                }
+
+                const preview = evaluateAccountLifecycle({
+                  ...scheduleTargetUser,
+                  reactivationDate: reactIso,
+                  deactivationDate: deactIso,
+                  autoDeactivateAt: deactIso,
+                });
+
+                const reactText = reactIso ? formatAutoDeactivateDateTime(reactIso) : null;
+                const deactText = deactIso ? formatAutoDeactivateDateTime(deactIso) : null;
+
+                return (
+                  <div className="p-3 rounded-lg bg-blue-50/70 border border-blue-200/80 text-[11px] text-slate-700 space-y-1">
+                    <p className="font-semibold text-[#0F2A4A]">Schedule Outcome Preview</p>
+                    <p>
+                      {preview.event === 'activated'
+                        ? `Account will reactivate immediately${deactText ? ` and auto-deactivate on ${deactText}` : ''}.`
+                        : preview.event === 'deactivated'
+                          ? `Account will deactivate immediately${reactText ? ` and auto-reactivate on ${reactText}` : ''}.`
+                          : reactText && deactText
+                            ? `Reactivates on ${reactText} and automatically deactivates on ${deactText}.`
+                            : reactText
+                              ? `Scheduled to automatically reactivate on ${reactText}.`
+                              : deactText
+                                ? `Scheduled to automatically deactivate on ${deactText}.`
+                                : 'No automatic dates scheduled — account remains manually managed.'}
+                    </p>
+                  </div>
+                );
+              })()}
+
+              <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setScheduleTargetUser(null)}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingSchedule}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-[#0F2A4A] hover:bg-[#163c68] disabled:opacity-60 text-white shadow-xs cursor-pointer"
+                >
+                  <Calendar className="w-3.5 h-3.5" />
+                  <span>{isSavingSchedule ? 'Saving...' : 'Save Dates'}</span>
                 </button>
               </div>
             </form>

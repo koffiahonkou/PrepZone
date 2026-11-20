@@ -13,10 +13,12 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { dataStore } from '@/src/services/dataStore';
+import { useAuth } from '@/src/context/AuthContext';
 import { AcademicClass, AcademicLevel, Subject, UserProfile } from '@/src/types';
 import { toast } from 'sonner';
 
 export const AdminClassesPage: React.FC = () => {
+  const { profile } = useAuth();
   const [classes, setClasses] = useState<AcademicClass[]>(() => dataStore.getClasses());
   const [levels, setLevels] = useState<AcademicLevel[]>(() => dataStore.getLevels());
   const [subjects, setSubjects] = useState<Subject[]>(() => dataStore.getSubjects());
@@ -116,7 +118,7 @@ export const AdminClassesPage: React.FC = () => {
         levelId: formLevelId,
         subjectIds: formSubjectIds,
       };
-      dataStore.saveClass(updated);
+      dataStore.saveClass(updated, profile?.uid);
       toast.success(`Class "${updated.name}" updated successfully.`);
     } else {
       const newClass: AcademicClass = {
@@ -126,7 +128,7 @@ export const AdminClassesPage: React.FC = () => {
         subjectIds: formSubjectIds,
         createdAt: new Date().toISOString(),
       };
-      dataStore.saveClass(newClass);
+      dataStore.saveClass(newClass, profile?.uid);
       toast.success(`Class "${newClass.name}" created successfully.`);
     }
 
@@ -137,7 +139,7 @@ export const AdminClassesPage: React.FC = () => {
   const handleDelete = () => {
     if (!deleteTarget) return;
     const studentCount = getStudentCount(deleteTarget.id);
-    dataStore.deleteClass(deleteTarget.id);
+    dataStore.deleteClass(deleteTarget.id, profile?.uid);
     setClasses(dataStore.getClasses());
     setDeleteTarget(null);
     if (studentCount > 0) {
@@ -181,7 +183,7 @@ export const AdminClassesPage: React.FC = () => {
         name: formLevelName.trim(),
         order: Number(formLevelOrder) || 1,
       };
-      dataStore.saveLevel(updated);
+      dataStore.saveLevel(updated, profile?.uid);
       toast.success(`Academic level "${updated.name}" updated successfully.`);
     } else {
       const newLevel: AcademicLevel = {
@@ -189,7 +191,7 @@ export const AdminClassesPage: React.FC = () => {
         name: formLevelName.trim(),
         order: Number(formLevelOrder) || levels.length + 1,
       };
-      dataStore.saveLevel(newLevel);
+      dataStore.saveLevel(newLevel, profile?.uid);
       toast.success(`Academic level "${newLevel.name}" created successfully.`);
     }
 
@@ -200,7 +202,7 @@ export const AdminClassesPage: React.FC = () => {
   const handleDeleteLevel = () => {
     if (!deleteLevelTarget) return;
     const associatedClasses = getClassesInLevelCount(deleteLevelTarget.id);
-    dataStore.deleteLevel(deleteLevelTarget.id);
+    dataStore.deleteLevel(deleteLevelTarget.id, profile?.uid);
     setLevels(dataStore.getLevels());
     setDeleteLevelTarget(null);
     if (associatedClasses > 0) {

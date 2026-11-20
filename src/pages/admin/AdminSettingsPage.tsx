@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Settings,
   Shield,
@@ -167,8 +168,15 @@ export const AdminSettingsPage: React.FC = () => {
         setPassMarkPercent(s.defaultPassMarkPercent ?? 50);
       }
     };
+    const handleAuditUpdate = () => {
+      setAuditLogs(dataStore.getAuditLogs());
+    };
     window.addEventListener('eduform_settings_updated', handleSettingsUpdate);
-    return () => window.removeEventListener('eduform_settings_updated', handleSettingsUpdate);
+    window.addEventListener('eduform_audit_logs_updated', handleAuditUpdate);
+    return () => {
+      window.removeEventListener('eduform_settings_updated', handleSettingsUpdate);
+      window.removeEventListener('eduform_audit_logs_updated', handleAuditUpdate);
+    };
   }, []);
 
   const handleSyncAllToCloud = async () => {
@@ -1622,15 +1630,22 @@ export const AdminSettingsPage: React.FC = () => {
       {/* Tab 4: Audit Logs */}
       {activeTab === 'audit' && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-2xs p-6 space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
             <div>
               <h3 className="text-base font-bold text-[#0F2A4A] flex items-center gap-2">
                 <History className="w-5 h-5 text-emerald-600" /> Administrative Audit Trail
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Append-only record of system events, user creation, quiz publishing, and policy edits
+                Append-only record of system events, user creation, class assignments, and quiz creation
               </p>
             </div>
+            <Link
+              to="/admin/activity-logs"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-[#0F2A4A] hover:bg-[#163c68] text-white transition-colors whitespace-nowrap shrink-0"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Open Full Activity Logs Console</span>
+            </Link>
           </div>
 
           <div className="overflow-x-auto">

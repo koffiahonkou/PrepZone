@@ -5,11 +5,9 @@ import {
   doc,
   getDoc,
   getDocs,
-  query,
   runTransaction,
   setDoc,
   updateDoc,
-  where,
 } from 'firebase/firestore';
 import {
   db,
@@ -21,10 +19,11 @@ import {
 } from '@/src/lib/firebase';
 import { UserProfile, UserRole } from '@/src/types';
 import { AppError } from '@/src/lib/errors';
-import { logAuditEvent } from '@/src/services/auditService';
 import { dataStore } from '@/src/services/dataStore';
 import {
+  evaluateAccountLifecycle,
   getDeactivationThreshold,
+  getReactivationThreshold,
   isAutoDeactivationDue,
   isDeveloperAccount,
 } from '@/src/utils/accountLifecycle';
@@ -68,6 +67,7 @@ export interface CreateUserInput {
   classIds: string[];
   levelIds: string[];
   adminActorId: string;
+  reactivationDate?: string | null;
   deactivationDate?: string | null;
 }
 
@@ -110,6 +110,7 @@ export async function createUserAsAdmin(input: CreateUserInput): Promise<UserPro
 
     const now = new Date().toISOString();
     const isDev = input.role === 'developer' || usernameLower === 'developer';
+    const normalizedReactivationDate = isDev ? null : input.reactivationDate ?? null;
     const normalizedDeactivationDate = isDev ? null : input.deactivationDate ?? null;
     const shouldDeactivateImmediately =
       !isDev &&
@@ -133,6 +134,7 @@ export async function createUserAsAdmin(input: CreateUserInput): Promise<UserPro
       createdBy: input.adminActorId,
       createdAt: now,
       lastLoginAt: null,
+      reactivationDate: normalizedReactivationDate,
       deactivationDate: normalizedDeactivationDate,
       autoDeactivateAt: normalizedDeactivationDate,
     };
@@ -148,8 +150,13 @@ export async function createUserAsAdmin(input: CreateUserInput): Promise<UserPro
     await setDoc(userProfileRef, sanitizeForFirestore(newProfile));
     dataStore.saveUser(newProfile, input.adminActorId);
 
-    // 5. Audit Log
-    await logAuditEvent({
+    // 5. Audit Log (User Created + Initial Class Assignments)
+    const allClasses = dataStore.getClasses();
+    const classNames = (input.classIds || []).map(
+      (cid) => allClasses.find((c) => c.id === cid)?.name || cid
+    );
+
+    dataStore.addAuditLog({
       actorId: input.adminActorId,
       action: 'USER_CREATED',
       targetType: 'user',
@@ -157,10 +164,35 @@ export async function createUserAsAdmin(input: CreateUserInput): Promise<UserPro
       meta: {
         username: usernameLower,
         role: input.role,
-        fullName: input.fullName,
+        fullName: input.fullName.trim(),
+        status: newProfile.status,
+        classIds: input.classIds,
+        classNames,
+        levelIds: input.levelIds,
+        reactivationDate: normalizedReactivationDate,
         deactivationDate: normalizedDeactivationDate,
       },
     });
+
+    if (input.classIds.length > 0) {
+      dataStore.addAuditLog({
+        actorId: input.adminActorId,
+        action: 'USER_CLASS_ASSIGNMENTS_UPDATED',
+        targetType: 'class_assignment',
+        targetId: createdUid,
+        meta: {
+          username: usernameLower,
+          fullName: input.fullName.trim(),
+          role: input.role,
+          classIds: input.classIds,
+          classNames,
+          addedClassIds: input.classIds,
+          addedClassNames: classNames,
+          removedClassIds: [],
+          removedClassNames: [],
+        },
+      });
+    }
 
     return newProfile;
   } catch (error: unknown) {
@@ -183,11 +215,14 @@ export async function createUserAsAdmin(input: CreateUserInput): Promise<UserPro
 }
 
 /**
- * Updates the scheduled deactivationDate threshold for an existing non-developer user.
+ * Updates both scheduled reactivationDate and deactivationDate for an existing non-developer user.
  */
-export async function updateUserDeactivationDate(
+export async function updateUserLifecycleDates(
   uid: string,
-  deactivationDate: string | null,
+  schedule: {
+    reactivationDate?: string | null;
+    deactivationDate?: string | null;
+  },
   actorId: string
 ): Promise<UserProfile> {
   const existing = dataStore.getUserById(uid);
@@ -200,21 +235,33 @@ export async function updateUserDeactivationDate(
   }
 
   if (isDeveloperAccount(target)) {
-    throw new AppError('The developer superuser account is permanently active and cannot be deactivated.');
+    throw new AppError('The developer superuser account is permanently active and cannot be scheduled.');
   }
 
-  const normalizedDate = deactivationDate || null;
-  const expired = isAutoDeactivationDue({
+  const nextReactInput =
+    schedule.reactivationDate !== undefined
+      ? schedule.reactivationDate || null
+      : getReactivationThreshold(target);
+  const nextDeactInput =
+    schedule.deactivationDate !== undefined
+      ? schedule.deactivationDate || null
+      : getDeactivationThreshold(target);
+
+  const candidate: UserProfile = {
     ...target,
-    deactivationDate: normalizedDate,
-    autoDeactivateAt: normalizedDate,
-  });
+    reactivationDate: nextReactInput,
+    deactivationDate: nextDeactInput,
+    autoDeactivateAt: nextDeactInput,
+  };
+
+  const lifecycle = evaluateAccountLifecycle(candidate);
 
   const updated: UserProfile = {
-    ...target,
-    deactivationDate: normalizedDate,
-    autoDeactivateAt: normalizedDate,
-    status: expired ? 'inactive' : target.status,
+    ...candidate,
+    status: lifecycle.nextStatus,
+    reactivationDate: lifecycle.nextReactivationDate,
+    deactivationDate: lifecycle.nextDeactivationDate,
+    autoDeactivateAt: lifecycle.nextDeactivationDate,
   };
 
   dataStore.saveUser(updated, actorId);
@@ -223,29 +270,46 @@ export async function updateUserDeactivationDate(
     await setDoc(
       doc(db, 'users', uid),
       sanitizeForFirestore({
-        deactivationDate: normalizedDate,
-        autoDeactivateAt: normalizedDate,
+        reactivationDate: updated.reactivationDate ?? null,
+        deactivationDate: updated.deactivationDate ?? null,
+        autoDeactivateAt: updated.deactivationDate ?? null,
         status: updated.status,
       }),
       { merge: true }
     );
   } catch (err) {
-    console.warn('Firestore deactivationDate sync deferred:', err);
+    console.warn('Firestore lifecycle schedule sync deferred:', err);
   }
 
-  await logAuditEvent({
+  dataStore.addAuditLog({
     actorId,
-    action: 'USER_DEACTIVATION_SCHEDULE_UPDATED',
+    action: 'USER_LIFECYCLE_SCHEDULE_UPDATED',
     targetType: 'user',
     targetId: uid,
     meta: {
       username: target.username,
-      deactivationDate: normalizedDate,
+      fullName: target.fullName,
+      previousStatus: target.status,
       status: updated.status,
+      reactivationDate: updated.reactivationDate ?? null,
+      previousReactivationDate: getReactivationThreshold(target),
+      deactivationDate: updated.deactivationDate ?? null,
+      previousDeactivationDate: getDeactivationThreshold(target),
     },
   });
 
   return updated;
+}
+
+/**
+ * Updates the scheduled deactivationDate threshold for an existing non-developer user.
+ */
+export async function updateUserDeactivationDate(
+  uid: string,
+  deactivationDate: string | null,
+  actorId: string
+): Promise<UserProfile> {
+  return updateUserLifecycleDates(uid, { deactivationDate }, actorId);
 }
 
 export interface UpdateUserInput {
@@ -257,6 +321,7 @@ export interface UpdateUserInput {
   classIds: string[];
   subjectIds?: string[];
   password?: string;
+  reactivationDate?: string | null;
   deactivationDate?: string | null;
 }
 
@@ -299,8 +364,13 @@ export async function updateUserAsAdmin(
 
   const isDev = isDeveloperAccount(existing);
   const threshold = isDev ? null : input.deactivationDate ?? null;
+  const reactivationThreshold = isDev
+    ? null
+    : input.reactivationDate !== undefined
+    ? input.reactivationDate ?? null
+    : getReactivationThreshold(existing);
 
-  const updated: UserProfile = {
+  const candidate: UserProfile = {
     ...existing,
     fullName: input.fullName.trim(),
     username: isDev ? 'developer' : input.username.trim(),
@@ -308,12 +378,22 @@ export async function updateUserAsAdmin(
     authEmail: isDev ? existing.authEmail : `${cleanUsername}@${AUTH_DOMAIN}`,
     role: isDev ? 'developer' : input.role === 'developer' ? existing.role : input.role,
     status: isDev ? 'active' : input.status,
+    reactivationDate: reactivationThreshold,
     deactivationDate: threshold,
     autoDeactivateAt: threshold,
     levelIds: input.levelIds,
     classIds: input.classIds,
     subjectIds: input.subjectIds ?? existing.subjectIds,
     password: input.password?.trim() || existing.password || 'Eduform123!',
+  };
+
+  const lifecycle = evaluateAccountLifecycle(candidate);
+  const updated: UserProfile = {
+    ...candidate,
+    status: isDev ? 'active' : lifecycle.nextStatus,
+    reactivationDate: isDev ? null : lifecycle.nextReactivationDate,
+    deactivationDate: isDev ? null : lifecycle.nextDeactivationDate,
+    autoDeactivateAt: isDev ? null : lifecycle.nextDeactivationDate,
   };
 
   const saved = dataStore.saveUser(updated, actorId);
@@ -335,6 +415,38 @@ export async function updateUserAsAdmin(
     }
   }
 
+  const allClasses = dataStore.getClasses();
+  const resolveClassName = (cid: string) => allClasses.find((c) => c.id === cid)?.name || cid;
+  const prevClassSet = new Set(existing.classIds || []);
+  const nextClassSet = new Set(updated.classIds || []);
+  const addedClassIds = (updated.classIds || []).filter((cid) => !prevClassSet.has(cid));
+  const removedClassIds = (existing.classIds || []).filter((cid) => !nextClassSet.has(cid));
+  const classNames = (updated.classIds || []).map(resolveClassName);
+
+  const changedFields: string[] = [];
+  if (existing.fullName !== updated.fullName) changedFields.push('fullName');
+  if (existing.usernameLower !== updated.usernameLower) changedFields.push('username');
+  if (existing.role !== updated.role) changedFields.push('role');
+  if (existing.status !== updated.status) changedFields.push('status');
+  if (getReactivationThreshold(existing) !== updated.reactivationDate) {
+    changedFields.push('reactivationDate');
+  }
+  if (getDeactivationThreshold(existing) !== updated.deactivationDate) {
+    changedFields.push('deactivationDate');
+  }
+  if (addedClassIds.length > 0 || removedClassIds.length > 0) {
+    changedFields.push('classIds');
+  }
+  if (JSON.stringify([...(existing.levelIds || [])].sort()) !== JSON.stringify([...(updated.levelIds || [])].sort())) {
+    changedFields.push('levelIds');
+  }
+  if (JSON.stringify([...(existing.subjectIds || [])].sort()) !== JSON.stringify([...(updated.subjectIds || [])].sort())) {
+    changedFields.push('subjectIds');
+  }
+  if (input.password?.trim() && input.password.trim() !== (existing.password || 'Eduform123!')) {
+    changedFields.push('password');
+  }
+
   dataStore.addAuditLog({
     actorId,
     action: 'USER_UPDATED',
@@ -342,24 +454,39 @@ export async function updateUserAsAdmin(
     targetId: updated.uid,
     meta: {
       username: updated.username,
+      previousUsername: existing.username !== updated.username ? existing.username : undefined,
+      fullName: updated.fullName,
       role: updated.role,
+      previousRole: existing.role !== updated.role ? existing.role : undefined,
       status: updated.status,
-      deactivationDate: updated.deactivationDate,
+      previousStatus: existing.status !== updated.status ? existing.status : undefined,
+      reactivationDate: updated.reactivationDate ?? null,
+      deactivationDate: updated.deactivationDate ?? null,
+      classIds: updated.classIds,
+      classNames,
+      changedFields,
     },
   });
 
-  void logAuditEvent({
-    actorId,
-    action: 'USER_UPDATED',
-    targetType: 'user',
-    targetId: updated.uid,
-    meta: {
-      username: updated.username,
-      role: updated.role,
-      status: updated.status,
-      deactivationDate: updated.deactivationDate,
-    },
-  });
+  if (addedClassIds.length > 0 || removedClassIds.length > 0) {
+    dataStore.addAuditLog({
+      actorId,
+      action: 'USER_CLASS_ASSIGNMENTS_UPDATED',
+      targetType: 'class_assignment',
+      targetId: updated.uid,
+      meta: {
+        username: updated.username,
+        fullName: updated.fullName,
+        role: updated.role,
+        classIds: updated.classIds,
+        classNames,
+        addedClassIds,
+        addedClassNames: addedClassIds.map(resolveClassName),
+        removedClassIds,
+        removedClassNames: removedClassIds.map(resolveClassName),
+      },
+    });
+  }
 
   return updated;
 }
@@ -403,82 +530,97 @@ export async function deleteUserAsAdmin(uid: string, actorId: string): Promise<v
       username: target.username,
       fullName: target.fullName,
       role: target.role,
-    },
-  });
-
-  void logAuditEvent({
-    actorId,
-    action: 'USER_DELETED',
-    targetType: 'user',
-    targetId: uid,
-    meta: {
-      username: target.username,
-      fullName: target.fullName,
-      role: target.role,
+      classIds: target.classIds || [],
     },
   });
 }
 
 /**
- * Evaluates a user account during login; if current date exceeds the deactivationDate
- * threshold, disables the account in Firestore and local store before blocking access.
+ * Evaluates a user account during login; automatically reactivates inactive accounts whose
+ * reactivationDate has arrived, and disables active accounts whose deactivationDate has elapsed.
  */
 export async function checkAndEnforceUserDeactivationOnLogin(
   user: UserProfile,
   nowMs: number = Date.now()
-): Promise<{ deactivated: boolean; profile: UserProfile }> {
+): Promise<{ deactivated: boolean; reactivated?: boolean; profile: UserProfile }> {
   if (isDeveloperAccount(user)) {
-    return { deactivated: false, profile: user };
+    return { deactivated: false, reactivated: false, profile: user };
   }
 
-  const threshold = getDeactivationThreshold(user);
-  const due = isAutoDeactivationDue(user, nowMs);
+  const lifecycle = evaluateAccountLifecycle(user, nowMs);
 
-  if (user.status === 'inactive') {
-    return { deactivated: true, profile: user };
-  }
-
-  if (!due) {
-    return { deactivated: false, profile: user };
+  if (!lifecycle.changed) {
+    return {
+      deactivated: lifecycle.nextStatus === 'inactive',
+      reactivated: false,
+      profile: user,
+    };
   }
 
   const updated: UserProfile = {
     ...user,
-    status: 'inactive',
-    deactivationDate: threshold,
-    autoDeactivateAt: threshold,
+    status: lifecycle.nextStatus,
+    reactivationDate: lifecycle.nextReactivationDate,
+    deactivationDate: lifecycle.nextDeactivationDate,
+    autoDeactivateAt: lifecycle.nextDeactivationDate,
   };
 
   dataStore.saveUser(updated);
 
   try {
     await updateDoc(doc(db, 'users', user.uid), {
-      status: 'inactive',
-      deactivationDate: threshold,
-      autoDeactivateAt: threshold,
+      status: updated.status,
+      reactivationDate: updated.reactivationDate ?? null,
+      deactivationDate: updated.deactivationDate ?? null,
+      autoDeactivateAt: updated.deactivationDate ?? null,
     });
   } catch {
     // Non-fatal if user is in local demo store or offline
   }
 
-  await logAuditEvent({
-    actorId: 'system-login-check',
-    action: 'USER_AUTO_DEACTIVATED',
-    targetType: 'user',
-    targetId: user.uid,
-    meta: {
-      username: user.username,
-      deactivationDate: threshold,
-      trigger: 'login_check',
-    },
-  });
+  if (lifecycle.event === 'activated') {
+    dataStore.addAuditLog({
+      actorId: 'system-login-check',
+      action: 'USER_AUTO_REACTIVATED',
+      targetType: 'user',
+      targetId: user.uid,
+      meta: {
+        username: user.username,
+        fullName: user.fullName,
+        reactivationDate: getReactivationThreshold(user),
+        deactivationDate: updated.deactivationDate ?? null,
+        trigger: 'login_check',
+      },
+    });
+    return { deactivated: false, reactivated: true, profile: updated };
+  }
 
-  return { deactivated: true, profile: updated };
+  if (lifecycle.event === 'deactivated') {
+    dataStore.addAuditLog({
+      actorId: 'system-login-check',
+      action: 'USER_AUTO_DEACTIVATED',
+      targetType: 'user',
+      targetId: user.uid,
+      meta: {
+        username: user.username,
+        fullName: user.fullName,
+        deactivationDate: getDeactivationThreshold(user),
+        trigger: 'login_check',
+      },
+    });
+  }
+
+  return {
+    deactivated: updated.status === 'inactive',
+    reactivated: false,
+    profile: updated,
+  };
 }
 
 /**
- * Scheduled job runner: scans active accounts in Firestore and local dataStore and disables
- * any non-developer account whose current date exceeds its configured deactivationDate.
+ * Scheduled job runner: scans accounts in Firestore and local dataStore and applies both
+ * automatic deactivations (when deactivationDate is reached) and automatic reactivations
+ * (when an inactive/old account reaches its scheduled reactivationDate).
  */
 export async function deactivateExpiredAccounts(
   actorId: string = 'system-scheduler',
@@ -486,15 +628,14 @@ export async function deactivateExpiredAccounts(
 ): Promise<UserProfile[]> {
   const candidatesMap = new Map<string, UserProfile>();
 
-  // 1. Collect active users from local store (also triggers local normalization)
+  // 1. Collect users from local store (also triggers local normalization)
   for (const localUser of dataStore.getUsers()) {
     candidatesMap.set(localUser.uid, localUser);
   }
 
-  // 2. Collect active users from Firestore cloud
+  // 2. Collect users from Firestore cloud (both active and inactive so reactivationDates are checked too)
   try {
-    const activeQuery = query(collection(db, 'users'), where('status', '==', 'active'));
-    const snap = await getDocs(activeQuery);
+    const snap = await getDocs(collection(db, 'users'));
     snap.forEach((d) => {
       const remote = d.data() as UserProfile;
       if (remote?.uid) {
@@ -505,57 +646,77 @@ export async function deactivateExpiredAccounts(
     // Fallback gracefully to local store when offline or unconfigured
   }
 
-  const newlyDeactivated: UserProfile[] = [];
+  const transitioned: UserProfile[] = [];
 
   for (const user of candidatesMap.values()) {
     if (isDeveloperAccount(user)) continue;
-    if (user.status !== 'active') continue;
-    if (!isAutoDeactivationDue(user, nowMs)) continue;
+    const lifecycle = evaluateAccountLifecycle(user, nowMs);
+    if (!lifecycle.changed) continue;
 
-    const threshold = getDeactivationThreshold(user);
     const updated: UserProfile = {
       ...user,
-      status: 'inactive',
-      deactivationDate: threshold,
-      autoDeactivateAt: threshold,
+      status: lifecycle.nextStatus,
+      reactivationDate: lifecycle.nextReactivationDate,
+      deactivationDate: lifecycle.nextDeactivationDate,
+      autoDeactivateAt: lifecycle.nextDeactivationDate,
     };
 
     dataStore.saveUser(updated);
-    newlyDeactivated.push(updated);
+    transitioned.push(updated);
 
     try {
       await setDoc(
         doc(db, 'users', updated.uid),
         sanitizeForFirestore({
-          status: 'inactive',
-          deactivationDate: threshold,
-          autoDeactivateAt: threshold,
+          status: updated.status,
+          reactivationDate: updated.reactivationDate ?? null,
+          deactivationDate: updated.deactivationDate ?? null,
+          autoDeactivateAt: updated.deactivationDate ?? null,
         }),
         { merge: true }
       );
     } catch (err) {
-      console.warn(`Firestore auto-deactivation sync deferred for ${updated.uid}:`, err);
+      console.warn(`Firestore lifecycle sync deferred for ${updated.uid}:`, err);
     }
 
-    await logAuditEvent({
-      actorId,
-      action: 'USER_AUTO_DEACTIVATED',
-      targetType: 'user',
-      targetId: updated.uid,
-      meta: {
-        username: updated.username,
-        deactivationDate: threshold,
-        trigger: 'scheduled_job',
-      },
-    });
+    if (lifecycle.event === 'deactivated') {
+      dataStore.addAuditLog({
+        actorId,
+        action: 'USER_AUTO_DEACTIVATED',
+        targetType: 'user',
+        targetId: updated.uid,
+        meta: {
+          username: updated.username,
+          fullName: updated.fullName,
+          deactivationDate: getDeactivationThreshold(user),
+          trigger: 'scheduled_job',
+        },
+      });
+    } else if (lifecycle.event === 'activated') {
+      dataStore.addAuditLog({
+        actorId,
+        action: 'USER_AUTO_REACTIVATED',
+        targetType: 'user',
+        targetId: updated.uid,
+        meta: {
+          username: updated.username,
+          fullName: updated.fullName,
+          reactivationDate: getReactivationThreshold(user),
+          deactivationDate: updated.deactivationDate ?? null,
+          trigger: 'scheduled_job',
+        },
+      });
+    }
   }
 
-  if (newlyDeactivated.length > 0 && typeof window !== 'undefined') {
+  if (transitioned.length > 0 && typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('eduform_users_updated'));
   }
 
-  return newlyDeactivated;
+  return transitioned;
 }
+
+export const processScheduledAccountLifecycle = deactivateExpiredAccounts;
 
 let scheduledJobTimer: ReturnType<typeof setInterval> | null = null;
 let jobRunning = false;

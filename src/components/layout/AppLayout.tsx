@@ -24,6 +24,7 @@ import {
   MessageSquareQuote,
   KeyRound,
   Code2,
+  History,
 } from 'lucide-react';
 import { useAuth } from '@/src/context/AuthContext';
 import { useColorMode } from '@/src/context/ColorModeContext';
@@ -162,6 +163,7 @@ export const AppLayout: React.FC = () => {
     { label: 'Submissions Queue', to: '/admin/submissions', icon: ClipboardList },
     { label: 'Class Gradebook', to: '/admin/gradebook', icon: Award },
     { label: 'Announcements', to: '/admin/notifications', icon: Bell },
+    { label: 'Activity Logs', to: '/admin/activity-logs', icon: History },
     { label: 'System Settings', to: '/admin/settings', icon: Settings },
   ];
 

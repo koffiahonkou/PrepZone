@@ -42,7 +42,10 @@ export async function loginWithUsername(usernameRaw: string, passwordRaw: string
     if (deactivated) {
       await fbSignOut(auth);
       throw new AppError(
-        getScheduledDeactivationNotice(getDeactivationThreshold(enforcedProfile)),
+        getScheduledDeactivationNotice(
+          getDeactivationThreshold(enforcedProfile),
+          enforcedProfile.reactivationDate
+        ),
         'auth/account-inactive'
       );
     }

@@ -30,7 +30,12 @@ export const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ childr
     return (
       <Navigate
         to="/login"
-        state={{ error: getScheduledDeactivationNotice(getDeactivationThreshold(profile)) }}
+        state={{
+          error: getScheduledDeactivationNotice(
+            getDeactivationThreshold(profile),
+            profile.reactivationDate
+          ),
+        }}
         replace
       />
     );

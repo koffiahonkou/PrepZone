@@ -250,7 +250,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const { deactivated, profile: enforcedUser } = await checkAndEnforceUserDeactivationOnLogin(registeredUser);
         if (deactivated) {
           throw new AppError(
-            getScheduledDeactivationNotice(getDeactivationThreshold(enforcedUser)),
+            getScheduledDeactivationNotice(
+              getDeactivationThreshold(enforcedUser),
+              enforcedUser.reactivationDate
+            ),
             'auth/account-inactive'
           );
         }
@@ -285,7 +288,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (demoProf.status === 'inactive' || isAutoDeactivationDue(demoProf)) {
           throw new AppError(
-            getScheduledDeactivationNotice(getDeactivationThreshold(demoProf)),
+            getScheduledDeactivationNotice(
+              getDeactivationThreshold(demoProf),
+              demoProf.reactivationDate
+            ),
             'auth/account-inactive'
           );
         }
@@ -387,7 +393,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.removeItem(LOCAL_STORAGE_DEMO_KEY);
       setProfile(null);
       setUser(null);
-      throw new AppError(getScheduledDeactivationNotice(getDeactivationThreshold(demoProf)));
+      throw new AppError(
+        getScheduledDeactivationNotice(
+          getDeactivationThreshold(demoProf),
+          demoProf.reactivationDate
+        )
+      );
     }
     localStorage.setItem(LOCAL_STORAGE_DEMO_KEY, demoProf.uid || key);
     setProfile({
